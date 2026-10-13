@@ -1,0 +1,35 @@
+{
+  "name": "meetnotes",
+  "productName": "MeetNotes",
+  "version": "1.1.0",
+  "description": "Personal meeting tracker with local transcription, notes and after-meeting agenda",
+  "main": "src/main.js",
+  "private": true,
+  "license": "UNLICENSED",
+  "author": "levanis-design",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test tests/logic.test.js tests/features.test.js tests/capture.test.js",
+    "dist": "electron-builder --win"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.133.0",
+    "@huggingface/transformers": "^4.3.1"
+  },
+  "devDependencies": {
+    "electron": "^44.7.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "local.meetnotes",
+    "productName": "MeetNotes",
+    "files": ["src/**/*", "renderer/**/*", "package.json"],
+    "asarUnpack": [
+      "src/whisper-worker.js",
+      "node_modules/onnxruntime-node/**",
+      "node_modules/sharp/**",
+      "node_modules/@img/**"
+    ],
+    "win": { "target": "nsis" }
+  }
+}

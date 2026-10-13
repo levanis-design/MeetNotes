@@ -1,0 +1,136 @@
+html, body {
+  margin: 0;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  user-select: none;
+  cursor: default;
+  font: 13px/1.35 "Segoe UI", system-ui, sans-serif;
+  color: #f2f4f7;
+}
+
+/* The window has a 12px margin on every side so the soft shadow is not clipped. */
+.widget {
+  position: absolute;
+  inset: 12px;
+  transition: opacity .25s ease;
+}
+.surface {
+  position: relative;
+  height: 100%;
+  border-radius: 18px;
+  overflow: hidden;
+  background: linear-gradient(180deg, rgba(36, 40, 49, .97), rgba(21, 24, 30, .97));
+  border: 1px solid rgba(255, 255, 255, .10);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, .34), inset 0 1px 0 rgba(255, 255, 255, .07);
+  transition: background .25s ease, border-radius .2s ease;
+}
+
+/* Transparent option: a see-through glass look that fades while the pointer is away. */
+.widget.transparent .surface {
+  background: rgba(17, 20, 26, .6);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  backdrop-filter: blur(14px) saturate(1.2);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .2), inset 0 1px 0 rgba(255, 255, 255, .10);
+}
+.widget.transparent .content { text-shadow: 0 1px 2px rgba(0, 0, 0, .55); }
+.widget.transparent.idle { opacity: var(--idle-opacity, .55); }
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 52px;
+  padding: 0 10px 0 16px;
+}
+.status { display: flex; align-items: center; gap: 8px; }
+.status-text { display: none; font-size: 11px; font-weight: 700; letter-spacing: .08em; color: #ff8a8c; }
+.size-card .status-text { display: inline; }
+.paused .status-text { color: #f5b64c; }
+.timer { font-variant-numeric: tabular-nums; font-weight: 600; font-size: 15px; min-width: 52px; }
+.spacer { flex: 1; }
+.controls { display: flex; gap: 4px; }
+
+.rec-dot {
+  display: block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #ff4d4f;
+  animation: pulse 1.6s ease-out infinite;
+}
+.paused .rec-dot { background: #f5a524; animation: none; box-shadow: none; }
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 rgba(255, 77, 79, .55); }
+  70% { box-shadow: 0 0 0 8px rgba(255, 77, 79, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 77, 79, 0); }
+}
+
+.eq { display: flex; align-items: center; gap: 3px; height: 20px; }
+.eq i {
+  display: block;
+  width: 3px;
+  height: 18px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #9ec1ff, #5b9bf0);
+  transform: scaleY(.18);
+  transition: transform .09s linear;
+}
+.paused .eq i { background: #6b7280; }
+
+.ib {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, .08);
+  color: #e9edf3;
+  cursor: pointer;
+  transition: background .15s ease, transform .1s ease;
+}
+.ib:hover { background: rgba(255, 255, 255, .18); }
+.ib:active { transform: scale(.94); }
+.ib.stop { color: #ff8e90; }
+.ib.stop:hover { background: rgba(255, 77, 79, .26); }
+.ib svg { width: 15px; height: 15px; }
+.card-ctl { display: none; }
+.size-card .card-ctl { display: grid; }
+
+/* Card: details under the control row */
+.card-only { display: none; padding: 0 16px 12px; }
+.size-card .card-only { display: block; }
+.title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.last {
+  margin-top: 3px;
+  min-height: 34px;
+  color: #b4bdc9;
+  font-size: 12px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.who-row { display: flex; gap: 14px; margin-top: 6px; font-size: 11px; color: #8d98a8; }
+.who i { display: inline-block; width: 6px; height: 6px; margin-right: 5px; border-radius: 50%; background: #4b5563; transition: background .12s ease; }
+.who.active i { background: #47cd89; }
+
+/* Dot: tiny corner button */
+.dot-btn {
+  display: none;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.size-dot .dot-btn { display: grid; }
+.size-dot .content { display: none; }
+.size-dot .surface { border-radius: 999px; }
+.size-dot .rec-dot { width: 14px; height: 14px; }

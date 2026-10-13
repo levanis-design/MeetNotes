@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MeetNotes</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+    <aside id="sidebar">
+      <div class="side-top">
+        <h1>MeetNotes</h1>
+        <button id="newBtn" class="primary">New meeting</button>
+        <input id="search" type="search" placeholder="Search meetings">
+      </div>
+      <ul id="list"></ul>
+      <div class="side-bottom">
+        <button id="settingsBtn">Settings</button>
+      </div>
+    </aside>
+
+    <main id="main">
+      <div id="empty" class="empty">
+        <h2>No meeting selected</h2>
+        <p>Create a meeting to start tracking it, taking notes and generating the after-meeting agenda.</p>
+      </div>
+
+      <section id="meeting" hidden>
+        <header class="m-head">
+          <div class="m-title">
+            <input id="mTitle" class="title-input" aria-label="Meeting title">
+            <span id="mStatus" class="pill"></span>
+            <span id="mTimer" class="timer">00:00</span>
+          </div>
+          <div class="m-actions">
+            <button id="pauseBtn" hidden>Pause</button>
+            <button id="cornerBtn" hidden title="Shrink to a small always-on-top widget in the screen corner">Minimize to corner</button>
+            <button id="pinBtn" aria-pressed="false" title="Keep this window above all other windows">Pin on top</button>
+            <button id="startBtn" class="primary">Start meeting</button>
+            <button id="stopBtn" class="danger" hidden>End meeting</button>
+            <button id="deleteBtn">Delete</button>
+          </div>
+        </header>
+
+        <div id="banner" class="banner" hidden></div>
+
+        <nav class="tabs">
+          <button id="tabMeeting" class="tab active">Meeting</button>
+          <button id="tabSummary" class="tab">Summary and agenda</button>
+        </nav>
+
+        <div id="paneMeeting" class="pane two-col">
+          <div class="col">
+            <label class="label" for="mAttendees">Attendees</label>
+            <input id="mAttendees" placeholder="Names, separated by commas">
+            <label class="label" for="mAgenda">Planned agenda or context</label>
+            <textarea id="mAgenda" rows="6" placeholder="One item per line"></textarea>
+            <div class="label">Notes</div>
+            <div class="note-add">
+              <input id="noteInput" placeholder="Type a note and press Enter">
+              <button id="noteBtn">Add</button>
+            </div>
+            <ul id="notes" class="notes"></ul>
+          </div>
+          <div class="col">
+            <div class="label">Live transcript</div>
+            <div id="transcript" class="transcript"></div>
+            <p id="pending" class="muted" hidden></p>
+          </div>
+        </div>
+
+        <div id="paneSummary" class="pane" hidden>
+          <div class="gen-bar">
+            <input id="genInstruction" placeholder="Optional instruction, for example: focus on budget and schedule items">
+            <button id="genBtn" class="primary">Generate summary and agenda</button>
+          </div>
+          <div class="export-bar">
+            <button id="copyBtn" class="exp" disabled>Copy Markdown</button>
+            <button id="mdBtn" class="exp" disabled>Export Markdown</button>
+            <button id="pdfBtn" class="exp" disabled>Export PDF</button>
+            <button id="txBtn" class="exp">Export transcript</button>
+            <button id="ghBtn" class="exp" disabled>Publish to GitHub</button>
+          </div>
+          <div id="ghInfo" class="gh-info" hidden>
+            <span id="ghText"></span>
+            <button id="ghOpen" class="link" type="button">Open on GitHub</button>
+          </div>
+          <div id="summary" class="summary"><p class="muted">Nothing generated yet.</p></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="statusbar" class="statusbar" hidden></div>
+
+  <dialog id="newDlg">
+    <form method="dialog" id="newForm">
+      <h2>New meeting</h2>
+      <label class="label" for="nTitle">Title</label>
+      <input id="nTitle" required placeholder="Weekly operations review">
+      <label class="label" for="nAttendees">Attendees</label>
+      <input id="nAttendees" placeholder="Optional">
+      <label class="label" for="nAgenda">Planned agenda or context</label>
+      <textarea id="nAgenda" rows="5" placeholder="Optional. One item per line"></textarea>
+      <div class="dlg-actions">
+        <button type="button" id="nCancel">Cancel</button>
+        <button type="submit" class="primary">Create</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="ghDlg">
+    <form method="dialog" id="ghForm">
+      <h2>Publish to GitHub</h2>
+      <p class="muted">Saves this meeting's summary as a Markdown file in its own folder under <code>meetings/</code> in the repository. If the repository does not exist, it is created.</p>
+      <label class="label" for="ghRepo">Repository</label>
+      <input id="ghRepo" required placeholder="meeting-notes or owner/meeting-notes">
+      <div class="label">Repository visibility</div>
+      <label class="check"><input type="radio" name="ghVis" value="private" checked> Private (recommended). Stop if the repository turns out to be public</label>
+      <label class="check"><input type="radio" name="ghVis" value="public"> Public. Anyone on the internet can read it</label>
+      <div class="label">Contents</div>
+      <label class="check"><input type="checkbox" id="ghTranscript"> Also upload the full transcript</label>
+      <p id="ghNote" class="muted"></p>
+      <div class="dlg-actions">
+        <button type="button" id="ghCancel">Cancel</button>
+        <button type="submit" id="ghGo" class="primary">Publish</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="settingsDlg">
+    <form method="dialog" id="settingsForm">
+      <h2>Settings</h2>
+
+      <h3>Claude and speech</h3>
+      <label class="label" for="sKey">Anthropic API key</label>
+      <input id="sKey" type="password" autocomplete="off" placeholder="Leave blank to keep the saved key">
+      <p id="keyState" class="muted"></p>
+      <label class="label" for="sModel">Claude model</label>
+      <input id="sModel">
+      <label class="label" for="sWhisper">Speech model</label>
+      <select id="sWhisper">
+        <option value="Xenova/whisper-tiny.en">tiny.en (fastest, lowest accuracy)</option>
+        <option value="Xenova/whisper-base.en">base.en (recommended)</option>
+        <option value="Xenova/whisper-small.en">small.en (most accurate, slowest)</option>
+      </select>
+      <p class="muted">The speech model downloads once, the first time you start a meeting, and then runs on this computer.</p>
+
+      <h3>Floating widget</h3>
+      <p class="muted">A small always-on-top recording widget shows the timer and controls while a meeting is live.</p>
+      <label class="label" for="sMiniAppearance">Appearance</label>
+      <select id="sMiniAppearance">
+        <option value="solid">Solid</option>
+        <option value="transparent">Transparent (fades when the pointer is away)</option>
+      </select>
+      <label class="label" for="sMiniOpacity">Transparent opacity when idle: <span id="sMiniOpacityVal"></span></label>
+      <input id="sMiniOpacity" type="range" min="20" max="100" step="5">
+      <label class="label" for="sMiniSize">Size</label>
+      <select id="sMiniSize">
+        <option value="pill">Bar (timer and controls)</option>
+        <option value="card">Card (adds title and last words)</option>
+        <option value="dot">Dot (tiny, corner only)</option>
+      </select>
+      <label class="label" for="sMiniCorner">Corner</label>
+      <select id="sMiniCorner">
+        <option value="top-right">Top right</option>
+        <option value="top-left">Top left</option>
+        <option value="bottom-right">Bottom right</option>
+        <option value="bottom-left">Bottom left</option>
+      </select>
+      <label class="check"><input type="checkbox" id="sAutoMini"> Show the widget automatically when a meeting starts</label>
+      <div class="dlg-actions left"><button type="button" id="sPreview">Preview widget</button></div>
+
+      <h3>GitHub</h3>
+      <label class="label" for="sGhToken">Personal access token</label>
+      <input id="sGhToken" type="password" autocomplete="off" placeholder="Leave blank to keep the saved token">
+      <p id="ghTokenState" class="muted"></p>
+      <label class="label" for="sGhRepo">Default repository</label>
+      <input id="sGhRepo" placeholder="meeting-notes">
+      <label class="label" for="sGhPrivate">Default visibility</label>
+      <select id="sGhPrivate">
+        <option value="private">Private (recommended)</option>
+        <option value="public">Public</option>
+      </select>
+      <p class="muted">The token is stored encrypted on this computer. The simplest safe setup is to create an empty private repository on github.com and use a fine-grained token limited to that repository with Contents set to read and write. Letting the app create repositories needs extra permission; the exact permission name is data to be confirmed, so a classic token with the repo scope is the fallback.</p>
+
+      <div class="dlg-actions spread">
+        <button type="button" id="sWipe" class="danger">Delete all meetings</button>
+        <span>
+          <button type="button" id="sTest">Test key</button>
+          <button type="button" id="sGhTest">Test GitHub</button>
+          <button type="button" id="sCancel">Close</button>
+          <button type="submit" class="primary">Save</button>
+        </span>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="segmenter.js"></script>
+  <script src="capture.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

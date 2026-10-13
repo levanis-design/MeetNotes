@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:">
+  <title>MeetNotes recording</title>
+  <link rel="stylesheet" href="mini.css">
+</head>
+<body>
+  <div id="widget" class="widget size-pill idle">
+    <div class="surface" id="surface">
+      <button id="dotBtn" class="dot-btn" aria-label="Expand recording widget" title="Recording. Click to expand">
+        <span class="rec-dot"></span>
+      </button>
+
+      <div class="content">
+        <div class="row">
+          <div class="status">
+            <span class="rec-dot"></span>
+            <span id="statusText" class="status-text">REC</span>
+          </div>
+          <span id="timer" class="timer">00:00</span>
+          <div class="eq" id="eq" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+          <div class="spacer"></div>
+          <div class="controls">
+            <button id="pauseBtn" class="ib" title="Pause" aria-label="Pause"></button>
+            <button id="stopBtn" class="ib stop" title="End meeting" aria-label="End meeting">
+              <svg viewBox="0 0 16 16"><rect x="4" y="4" width="8" height="8" rx="1.8" fill="currentColor"/></svg>
+            </button>
+            <button id="openBtn" class="ib" title="Open MeetNotes" aria-label="Open MeetNotes">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 3H13v3.5M13 3L8.8 7.2M6.5 13H3V9.5M3 13l4.2-4.2"/></svg>
+            </button>
+            <button id="sizeBtn" class="ib" title="Show details" aria-label="Show details"></button>
+            <button id="minBtn" class="ib" title="Collapse to corner dot" aria-label="Collapse to corner dot">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4.5 8h7"/></svg>
+            </button>
+            <button id="hideBtn" class="ib card-ctl" title="Hide widget" aria-label="Hide widget">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="card-only">
+          <div id="title" class="title"></div>
+          <div id="last" class="last"></div>
+          <div class="who-row">
+            <span class="who" id="whoYou"><i></i>You</span>
+            <span class="who" id="whoOthers"><i></i>Others</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script src="mini.js"></script>
+</body>
+</html>

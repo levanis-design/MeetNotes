@@ -1,0 +1,464 @@
+'use strict';
+const path = require('path');
+const fs = require('fs');
+const { app, BrowserWindow, ipcMain, session, desktopCapturer, dialog, safeStorage, screen, shell } = require('electron');
+const { createStore } = require('./store');
+const { Transcriber, toFloat32 } = require('./transcriber');
+const ai = require('./ai');
+const render = require('./render');
+const github = require('./github');
+const layout = require('./mini-layout');
+
+let win = null;
+let mini = null;
+let store = null;
+let transcriber = null;
+
+let live = false;            // a meeting is being recorded
+let miniState = null;        // last state sent by the main window
+let miniDismissed = false;   // user closed the widget during this meeting
+let previewing = false;
+let previewTimer = null;
+
+const PREVIEW_STATE = {
+  live: true,
+  paused: false,
+  title: 'Weekly operations review',
+  elapsed: 754,
+  last: { source: 'others', text: 'We agreed to move the roof inspection to Thursday.' },
+  preview: true,
+};
+
+const cipher = {
+  encrypt(text) {
+    if (!safeStorage.isEncryptionAvailable()) throw new Error('Secure storage is not available on this computer.');
+    return safeStorage.encryptString(text).toString('base64');
+  },
+  decrypt(b64) {
+    return safeStorage.decryptString(Buffer.from(b64, 'base64'));
+  },
+};
+
+function sendStatus(msg) {
+  if (win && !win.isDestroyed()) win.webContents.send('model:status', msg);
+}
+
+function getTranscriber() {
+  const wanted = store.getSettings().whisperModel;
+  if (transcriber && transcriber.modelName !== wanted) {
+    transcriber.dispose();
+    transcriber = null;
+  }
+  if (!transcriber || transcriber.state === 'error' || transcriber.state === 'disposed') {
+    transcriber = new Transcriber({
+      modelName: wanted,
+      cacheDir: path.join(app.getPath('userData'), 'models'),
+      onStatus: sendStatus,
+    });
+  }
+  return transcriber;
+}
+
+// ---------- main window ----------
+function createWindow() {
+  win = new BrowserWindow({
+    width: 1280,
+    height: 820,
+    minWidth: 960,
+    minHeight: 600,
+    title: 'MeetNotes',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      backgroundThrottling: false, // keep capturing when the window is minimized or hidden
+    },
+  });
+  win.setMenuBarVisibility(false);
+  if (store.getSettings().mainAlwaysOnTop) win.setAlwaysOnTop(true);
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  win.webContents.on('will-navigate', (e) => e.preventDefault());
+  win.on('close', (e) => {
+    if (!live) return;
+    const choice = dialog.showMessageBoxSync(win, {
+      type: 'question',
+      buttons: ['Keep recording', 'Close anyway'],
+      defaultId: 0,
+      cancelId: 0,
+      message: 'A meeting is being recorded.',
+      detail: 'Closing now stops the recording. Text transcribed so far is already saved.',
+    });
+    if (choice === 0) e.preventDefault();
+  });
+  win.on('closed', () => {
+    win = null;
+    destroyMini();
+  });
+  win.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
+}
+
+function showMain() {
+  if (!win || win.isDestroyed()) return;
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+}
+
+// ---------- floating widget ----------
+function currentMiniState() {
+  return previewing ? PREVIEW_STATE : miniState;
+}
+
+function sendMini(channel, payload) {
+  if (mini && !mini.isDestroyed()) mini.webContents.send(channel, payload);
+}
+
+function miniSettings() {
+  const s = store.getSettings();
+  return { appearance: s.miniAppearance, opacity: s.miniOpacity, size: s.miniSize, corner: s.miniCorner };
+}
+
+function displayForMini() {
+  if (mini && !mini.isDestroyed()) return screen.getDisplayMatching(mini.getBounds());
+  if (win && !win.isDestroyed()) return screen.getDisplayMatching(win.getBounds());
+  return screen.getPrimaryDisplay();
+}
+
+function applyMiniBounds() {
+  if (!mini || mini.isDestroyed()) return;
+  const s = store.getSettings();
+  const size = layout.SIZES[s.miniSize];
+  const pos = layout.cornerPosition(s.miniCorner, size, displayForMini().workArea);
+  mini.setBounds({ x: pos.x, y: pos.y, width: size.width, height: size.height });
+}
+
+function createMini() {
+  if (mini && !mini.isDestroyed()) return mini;
+  const s = store.getSettings();
+  const size = layout.SIZES[s.miniSize];
+  const pos = layout.cornerPosition(s.miniCorner, size, displayForMini().workArea);
+  mini = new BrowserWindow({
+    x: pos.x,
+    y: pos.y,
+    width: size.width,
+    height: size.height,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    hasShadow: false,
+    resizable: false,
+    maximizable: false,
+    minimizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    show: false,
+    title: 'MeetNotes recording',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload-mini.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      backgroundThrottling: false,
+    },
+  });
+  mini.setAlwaysOnTop(true, 'screen-saver'); // stays above other windows, including full-screen apps
+  try { mini.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true }); } catch (e) { /* not supported here */ }
+  mini.setMenuBarVisibility(false);
+  mini.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  mini.webContents.on('will-navigate', (e) => e.preventDefault());
+  mini.on('closed', () => { mini = null; });
+  mini.loadFile(path.join(__dirname, '..', 'renderer', 'mini.html'));
+  return mini;
+}
+
+function showMini() {
+  const m = createMini();
+  applyMiniBounds();
+  if (!m.isVisible()) m.showInactive(); // do not steal focus from the meeting app
+}
+
+function hideMini() {
+  if (mini && !mini.isDestroyed()) mini.hide();
+}
+
+function destroyMini() {
+  clearTimeout(previewTimer);
+  previewing = false;
+  if (mini && !mini.isDestroyed()) mini.destroy();
+  mini = null;
+}
+
+function registerMiniIpc() {
+  // From the main window
+  ipcMain.on('mini:update', (e, state) => {
+    const wasLive = live;
+    live = Boolean(state && state.live);
+    miniState = state || null;
+    if (live && !wasLive) miniDismissed = false;
+    if (live && !miniDismissed && store.getSettings().autoMini) showMini();
+    else if (!live && !previewing) hideMini();
+    sendMini('mini:state', currentMiniState());
+  });
+  ipcMain.on('mini:levels', (e, levels) => {
+    if (mini && !mini.isDestroyed() && mini.isVisible() && !previewing) sendMini('mini:levels', levels);
+  });
+  ipcMain.handle('mini:toggle', () => {
+    if (!live) return false;
+    if (mini && !mini.isDestroyed() && mini.isVisible()) {
+      miniDismissed = true;
+      hideMini();
+      return false;
+    }
+    miniDismissed = false;
+    showMini();
+    return true;
+  });
+  ipcMain.handle('mini:preview', () => {
+    clearTimeout(previewTimer);
+    previewing = true;
+    showMini();
+    sendMini('mini:state', PREVIEW_STATE);
+    previewTimer = setTimeout(() => {
+      previewing = false;
+      if (live && !miniDismissed) sendMini('mini:state', miniState);
+      else hideMini();
+    }, 8000);
+    return true;
+  });
+  ipcMain.handle('window:minimizeToCorner', () => {
+    if (!win || win.isDestroyed()) return false;
+    miniDismissed = false;
+    if (live) showMini();
+    win.minimize();
+    return true;
+  });
+  ipcMain.handle('window:setOnTop', (e, value) => {
+    const on = Boolean(value);
+    store.setSettings({ mainAlwaysOnTop: on });
+    if (win && !win.isDestroyed()) win.setAlwaysOnTop(on);
+    return on;
+  });
+
+  // From the widget
+  ipcMain.on('mini:ready', () => {
+    sendMini('mini:settings', miniSettings());
+    sendMini('mini:state', currentMiniState());
+  });
+  ipcMain.on('mini:command', (e, name) => {
+    if (name === 'open') return showMain();
+    if (['pause', 'resume', 'stop'].includes(name) && win && !win.isDestroyed()) {
+      win.webContents.send('mini:command', name);
+      if (name === 'stop') showMain(); // bring the summary into view
+    }
+  });
+  ipcMain.on('mini:setSize', (e, size) => {
+    if (!layout.isSize(size)) return;
+    store.setSettings({ miniSize: size });
+    applyMiniBounds();
+    sendMini('mini:settings', miniSettings());
+  });
+  ipcMain.on('mini:moveBy', (e, dx, dy) => {
+    if (!mini || mini.isDestroyed() || !isFinite(dx) || !isFinite(dy)) return;
+    const b = mini.getBounds();
+    const size = layout.SIZES[store.getSettings().miniSize];
+    mini.setBounds({ x: Math.round(b.x + dx), y: Math.round(b.y + dy), width: size.width, height: size.height });
+  });
+  ipcMain.on('mini:dragEnd', () => {
+    if (!mini || mini.isDestroyed()) return;
+    const corner = layout.nearestCorner(mini.getBounds(), displayForMini().workArea);
+    store.setSettings({ miniCorner: corner });
+    applyMiniBounds(); // snap to the nearest corner
+    sendMini('mini:settings', miniSettings());
+  });
+  ipcMain.on('mini:hide', () => {
+    miniDismissed = true;
+    hideMini();
+  });
+}
+
+// ---------- media access ----------
+function setupMediaAccess() {
+  const ses = session.defaultSession;
+  // System audio (what the other participants say) is captured with Windows loopback audio.
+  ses.setDisplayMediaRequestHandler((request, callback) => {
+    desktopCapturer
+      .getSources({ types: ['screen'] })
+      .then((sources) => callback({ video: sources[0], audio: 'loopback' }))
+      .catch(() => callback({}));
+  });
+  ses.setPermissionRequestHandler((wc, permission, cb) => cb(permission === 'media' || permission === 'display-capture'));
+  ses.setPermissionCheckHandler((wc, permission) => permission === 'media' || permission === 'display-capture');
+}
+
+function safeName(s) {
+  return String(s || 'meeting').replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim().slice(0, 80) || 'meeting';
+}
+
+async function saveWithDialog(defaultName, filters, writer) {
+  const r = await dialog.showSaveDialog(win, { defaultPath: defaultName, filters });
+  if (r.canceled || !r.filePath) return null;
+  await writer(r.filePath);
+  return r.filePath;
+}
+
+// ---------- IPC ----------
+function registerIpc() {
+  // Settings
+  ipcMain.handle('settings:get', () => store.getSettings());
+  ipcMain.handle('settings:set', (e, patch) => {
+    const result = store.setSettings(patch || {});
+    sendMini('mini:settings', miniSettings());
+    if (mini && !mini.isDestroyed()) applyMiniBounds();
+    return result;
+  });
+  ipcMain.handle('settings:testKey', async () => {
+    const key = store.getApiKey();
+    if (!key) throw new Error('No API key saved.');
+    await ai.testKey({ apiKey: key, model: store.getSettings().model });
+    return true;
+  });
+
+  // Meetings
+  ipcMain.handle('meetings:list', () => store.list());
+  ipcMain.handle('meetings:create', (e, data) => store.create(data));
+  ipcMain.handle('meetings:get', (e, id) => store.get(id));
+  ipcMain.handle('meetings:update', (e, id, patch) => store.update(id, patch || {}));
+  ipcMain.handle('meetings:addNote', (e, id, note) => store.addNote(id, note || {}));
+  ipcMain.handle('meetings:remove', (e, id) => store.remove(id));
+  ipcMain.handle('data:wipe', async () => {
+    const r = await dialog.showMessageBox(win, {
+      type: 'warning',
+      buttons: ['Cancel', 'Delete all meetings'],
+      defaultId: 0,
+      cancelId: 0,
+      message: 'Delete all meetings, transcripts and notes?',
+      detail: 'This cannot be undone. Your settings, API key and GitHub token are kept. Anything already published to GitHub stays there.',
+    });
+    if (r.response !== 1) return false;
+    store.wipeAll();
+    return true;
+  });
+
+  // Speech
+  ipcMain.handle('model:ensure', async () => {
+    await getTranscriber().ensureReady();
+    return true;
+  });
+  ipcMain.handle('audio:transcribe', async (e, { meetingId, source, t, samples }) => {
+    const text = await getTranscriber().transcribe(toFloat32(samples));
+    if (!text) return null;
+    const item = { t: Math.max(0, Number(t) || 0), source: source === 'you' ? 'you' : 'others', text };
+    store.appendTranscript(meetingId, item);
+    return item;
+  });
+
+  // AI
+  ipcMain.handle('ai:generate', async (e, { id, instruction }) => {
+    const key = store.getApiKey();
+    if (!key) throw new Error('Add your Anthropic API key in Settings first.');
+    const meeting = store.get(id);
+    const summary = await ai.generateSummary({
+      apiKey: key,
+      model: store.getSettings().model,
+      meeting,
+      instruction,
+    });
+    return store.setSummary(id, summary);
+  });
+
+  // GitHub
+  ipcMain.handle('github:test', async () => {
+    const token = store.getGithubToken();
+    if (!token) throw new Error('No GitHub token saved.');
+    const user = await github.createClient({ token }).getUser();
+    return { login: user.login };
+  });
+  ipcMain.handle('github:publish', async (e, { id, repoName, isPrivate, includeTranscript }) => {
+    const token = store.getGithubToken();
+    if (!token) throw new Error('Add a GitHub token in Settings first.');
+    const meeting = store.get(id);
+    if (!meeting.summary) throw new Error('Generate the summary before publishing.');
+    if (!isPrivate) {
+      const r = await dialog.showMessageBox(win, {
+        type: 'warning',
+        buttons: ['Cancel', 'Publish publicly'],
+        defaultId: 0,
+        cancelId: 0,
+        message: 'Publish this meeting to a public repository?',
+        detail: 'Anyone on the internet will be able to read it. Meeting content can include confidential information.',
+      });
+      if (r.response !== 1) return null;
+    }
+    const result = await github.publishMeeting({
+      client: github.createClient({ token }),
+      repoInput: repoName,
+      isPrivate: Boolean(isPrivate),
+      allowPublic: !isPrivate,
+      meeting,
+      renderMarkdown: (m) => render.renderMarkdown(m),
+      renderTranscript: (m) => render.renderTranscriptText(m),
+      includeTranscript: Boolean(includeTranscript),
+    });
+    const record = {
+      repo: result.repo,
+      folder: result.folder,
+      url: result.url,
+      publishedAt: new Date().toISOString(),
+      transcript: Boolean(includeTranscript),
+    };
+    store.update(id, { github: record });
+    store.setSettings({ githubRepo: repoName });
+    return record;
+  });
+  ipcMain.handle('shell:open', (e, url) => {
+    if (typeof url === 'string' && url.startsWith('https://github.com/')) return shell.openExternal(url);
+    return false;
+  });
+
+  // Rendering and export
+  ipcMain.handle('render:html', (e, id) => render.renderHtml(store.get(id)));
+  ipcMain.handle('render:markdown', (e, id) => render.renderMarkdown(store.get(id)));
+  ipcMain.handle('export:markdown', async (e, id) => {
+    const m = store.get(id);
+    return saveWithDialog(`${safeName(m.title)}.md`, [{ name: 'Markdown', extensions: ['md'] }], (f) =>
+      fs.promises.writeFile(f, render.renderMarkdown(m), 'utf8'));
+  });
+  ipcMain.handle('export:transcript', async (e, id) => {
+    const m = store.get(id);
+    return saveWithDialog(`${safeName(m.title)} transcript.txt`, [{ name: 'Text', extensions: ['txt'] }], (f) =>
+      fs.promises.writeFile(f, render.renderTranscriptText(m), 'utf8'));
+  });
+  ipcMain.handle('export:pdf', async (e, id) => {
+    const m = store.get(id);
+    return saveWithDialog(`${safeName(m.title)}.pdf`, [{ name: 'PDF', extensions: ['pdf'] }], async (f) => {
+      const hidden = new BrowserWindow({ show: false, webPreferences: { sandbox: true } });
+      try {
+        const html = render.renderHtml(m, { standalone: true });
+        await hidden.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+        const pdf = await hidden.webContents.printToPDF({ printBackground: true, pageSize: 'Letter' });
+        await fs.promises.writeFile(f, pdf);
+      } finally {
+        hidden.destroy();
+      }
+    });
+  });
+
+  registerMiniIpc();
+}
+
+app.whenReady().then(() => {
+  store = createStore(app.getPath('userData'), cipher);
+  setupMediaAccess();
+  registerIpc();
+  createWindow();
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  });
+});
+
+app.on('window-all-closed', () => {
+  if (transcriber) transcriber.dispose();
+  if (process.platform !== 'darwin') app.quit();
+});
