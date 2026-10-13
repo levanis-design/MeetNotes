@@ -27,12 +27,28 @@ contextBridge.exposeInMainWorld('api', {
   exportPdf: (id) => invoke('export:pdf', id),
   exportTranscript: (id) => invoke('export:transcript', id),
 
+  openExternal: (url) => invoke('shell:open', url),
+
   getUpdateState: () => invoke('updates:get'),
   checkUpdates: () => invoke('updates:check'),
   downloadUpdate: () => invoke('updates:download'),
   installUpdate: () => invoke('updates:install'),
   openReleases: () => invoke('updates:openReleases'),
   onUpdateStatus: (cb) => ipcRenderer.on('updates:status', (e, state) => cb(state)),
+
+  // Tasks, dashboard and calendar
+  listTasks: () => invoke('tasks:list'),
+  addTask: (input) => invoke('tasks:add', input),
+  updateTask: (id, patch) => invoke('tasks:update', id, patch),
+  removeTask: (id) => invoke('tasks:remove', id),
+  dashboard: (opts) => invoke('dashboard:get', opts),
+  calendarEvents: (range) => invoke('calendar:events', range),
+  meetingFromEvent: (eventId) => invoke('meetings:fromEvent', eventId),
+  outlookConnect: () => invoke('outlook:connect'),
+  outlookCancel: () => invoke('outlook:cancel'),
+  outlookDisconnect: () => invoke('outlook:disconnect'),
+  onOutlookCode: (cb) => ipcRenderer.on('outlook:code', (e, info) => cb(info)),
+  testIcs: () => invoke('ics:test'),
 
   // Floating widget and window options
   miniUpdate: (state) => ipcRenderer.send('mini:update', state),

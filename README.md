@@ -1,4 +1,4 @@
-# MeetNotes v1.2.0
+# MeetNotes v1.3.0
 
 Personal Windows desktop app that tracks a meeting, transcribes it locally, keeps your notes, and generates a summary, action items and an after-meeting agenda with Claude.
 
@@ -26,7 +26,36 @@ Personal Windows desktop app that tracks a meeting, transcribes it locally, keep
 
 Anything the meeting did not state is marked "Data to be confirmed" instead of guessed. Regenerate with an optional instruction, for example "focus on budget and schedule items".
 
-## Features
+## New in 1.3.0
+
+### Dashboard (opens first)
+- Greeting with what is left today, **Recent meeting notes**, **My task list** (To-do and Completed, with a quick-add box), **Weekly progress**, the latest summary, and **Action items for this week**.
+- A month calendar on the right with a dot on days that have events, and **Upcoming meetings** below it. Click a day to see that day's meetings.
+- Each meeting has **Join** (opens the Teams, Zoom, Google Meet or Webex link) and **Take notes**, which creates a MeetNotes meeting with the title and attendees already filled in. If you already created notes for it, the button says **Open notes**.
+- "Weekly progress" counts only your tasks that are due this week (Sunday to Saturday). With nothing due, it shows no percentage instead of 0%.
+- A red chip in the sidebar shows an active recording from any screen and takes you back to it.
+
+### Tasks
+- Add tasks by hand, or let them come from meetings: when a summary is generated, its action items are added to Tasks (turn this off in Settings). Regenerating a summary replaces imported items you have not touched, and keeps ones you finished or edited.
+- A task is yours when it has no owner or names you (set "Your name" in Settings). Items owned by other people are under "Assigned to others".
+- Due dates are filled only when Claude can state a date with certainty (for example "Friday" resolved from the meeting date). Otherwise the task shows "Data to be confirmed" and no date. Check imported dates.
+
+### Outlook calendar (read-only)
+Two ways to connect, in Settings:
+
+1. **Sign in with Microsoft (recommended).** You register a small app once in Microsoft Entra, so no shared secret is built into MeetNotes:
+   1. Open entra.microsoft.com, then App registrations, then New registration. Name it MeetNotes.
+   2. Work account: choose "Accounts in this organizational directory only". Personal Outlook.com account: choose the option that includes personal Microsoft accounts. Leave the redirect address empty.
+   3. Authentication: set "Allow public client flows" to Yes.
+   4. API permissions: add Microsoft Graph, Delegated, **Calendars.Read** and **User.Read**. MeetNotes never asks to change your calendar.
+   5. Copy the Application (client) ID and Directory (tenant) ID into Settings. For a work account use the tenant ID or your domain; for a personal account use `common`.
+   6. Press Connect Outlook, open the Microsoft page, type the code shown, and approve.
+   Your organisation may require an administrator to approve the permission. If sign-in fails, the message in the dialog says why.
+2. **Published calendar link.** In Outlook on the web: Settings, Calendar, Shared calendars, Publish a calendar, copy the ICS link into Settings. No registration needed, but many organisations block publishing. Recurring meetings, exceptions and time zones are handled.
+
+The sign-in token and the calendar link are stored encrypted with Windows secure storage. MeetNotes can only read your calendar. It cannot schedule meetings.
+
+## New in 1.1.0
 
 ### Floating recording widget
 - While a meeting is live, a small player-style widget sits in a screen corner: pulsing REC dot, timer, level meter, pause/resume, stop, open-app.
@@ -53,9 +82,11 @@ Anything the meeting did not state is marked "Data to be confirmed" instead of g
 
 - Audio is never saved. Only recognized text is stored, in `%APPDATA%\meetnotes`.
 - Speech recognition runs on your computer.
-- Generating a summary sends that meeting's transcript, notes and agenda text to the Anthropic API. Meeting content is sent to Claude only when you press Generate.
-- Your API key is encrypted with Windows secure storage.
-- Update checks and installer downloads contact GitHub without including meeting content.
+- Generating a summary sends that meeting's transcript, notes and agenda text to the Anthropic API. Meeting content is sent to Claude only when you press Generate. Calendar data is not sent anywhere except through a meeting you create from an event: its title and attendee names then become part of that meeting.
+- Calendar events are read from Microsoft Graph (or your calendar link) and kept in memory only for a few minutes. They are not saved to disk.
+- Join links are opened only when they point to Teams, Zoom, Google Meet, Webex or GoTo, because invites are written by other people.
+- Your API key, Outlook refresh token and calendar-link secret are encrypted with Windows secure storage.
+- GitHub update requests include no meeting, task or calendar content.
 - Settings has a button to delete all meetings.
 - Tell participants you are recording notes. Some states require everyone's consent to record.
 
@@ -66,18 +97,22 @@ Anything the meeting did not state is marked "Data to be confirmed" instead of g
 - The windows are not hidden from screen sharing. This app is built for your own notes, not for covert use.
 - If your network blocks nuget.org or huggingface.co, installation or the first speech-model download will fail. Both are one-time downloads.
 
-## Validation and preview status
+## Validation and remaining live checks
 
-The real GitHub update feed, installer download and checksum verification pass. Windows packaging, Electron UI/IPC, PDF/Markdown/text exports, floating-widget creation and always-on-top, and recording lifecycle with simulated audio have been tested. Real Whisper model loading and CPU inference pass, including from the packaged app, using synthetic silence. Live microphone/loopback capture, real-speech accuracy, Claude API summaries, a complete installed-app upgrade, transparency, dragging and DPI scaling still require live checks. See [REVIEW.md](REVIEW.md) and [RELEASE_NOTES.md](RELEASE_NOTES.md).
+Automated tests cover meetings, tasks, dashboard calculations, calendar recurrence and time zones, sign-in cancellation, encrypted settings, stale calendar responses, and app updates. The desktop smoke test covers dashboard/task entry and completion, meeting editing, PDF/Markdown/text exports, the widget and recording lifecycle with simulated audio. The Windows installer and packaged local transcription are checked before publishing.
+
+A real Microsoft sign-in, organisational consent policies, live microphone/system audio, Claude API calls and the actual restart/install upgrade still require a check on your setup. No account is connected automatically during testing.
+
+Calendar integration follows Microsoft's [device code flow](https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-device-code) and [calendarView](https://learn.microsoft.com/en-us/graph/api/user-list-calendarview?view=graph-rest-1.0) documentation. Calendar access is read-only.
 
 ## Development
 
-- `npm test` runs the logic tests (storage, rendering, AI parsing, audio segmentation).
+- `npm test` runs the logic tests (storage, rendering, AI parsing, audio segmentation, dashboard, tasks, Outlook and ICS calendars, and app updates).
 - `node --test tests/capture.test.js` runs audio-cleanup and worker-disposal regressions.
 - `npx electron tests/electron-smoke.cjs` runs isolated desktop integration checks. Add `--packaged` after building to test the packaged source.
 - `node tests/transcription-smoke.cjs` downloads the model into isolated test data and runs real CPU inference on silence.
 - `npx electron tests/packaged-transcription.cjs` checks packaged speech-worker inference after a build.
-- `npx electron tests/update-feed-smoke.cjs` checks the published 1.2.0 feed and downloads/checksums the installer into isolated test data without installing it.
+- `npx electron tests/update-feed-smoke.cjs` checks the published package-version feed and downloads/checksums the installer into isolated test data without installing it.
 - `npm run dist -- --publish never` builds the verified Windows installer without automatic publishing.
 - Code layout: `src/` main process, `renderer/` interface and audio capture.
 
@@ -85,7 +120,7 @@ The real GitHub update feed, installer download and checksum verification pass. 
 
 The Windows NSIS installer uses `electron-updater` with the public GitHub Releases feed. A release must contain the installer, its `.blockmap` file and `latest.yml`; the metadata names the installer and its SHA-512 checksum. See the [electron-builder update documentation](https://www.electron.build/v26/docs/features/auto-update/).
 
-1. Bump `version` in `package.json` and refresh the lockfile with `npm install --package-lock-only`.
+1. Bump `version` in `package.json` and refresh the lockfile with `npm install --package-lock-only --legacy-peer-deps=false`.
 2. Update `RELEASE_NOTES.md`, run the tests and desktop smoke checks, and commit the changes.
 3. Push the commit and a matching tag, for example `v1.2.1` for version `1.2.1`.
 4. The **Publish Windows release** GitHub Actions workflow tests and builds the app, then publishes the installer and update metadata using the repository's Actions token. Users do not need that token.

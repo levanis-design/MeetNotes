@@ -10,82 +10,244 @@
 <body>
   <div id="app">
     <aside id="sidebar">
-      <div class="side-top">
+      <div class="brand">
+        <span class="logo" aria-hidden="true">M</span>
         <h1>MeetNotes</h1>
-        <button id="newBtn" class="primary">New meeting</button>
-        <input id="search" type="search" placeholder="Search meetings">
       </div>
-      <ul id="list"></ul>
-      <div class="side-bottom">
-        <button id="settingsBtn">Settings</button>
+      <nav class="nav" aria-label="Main">
+        <button id="navDash" class="nav-btn active" data-view="dashboard">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.6"/><rect x="14" y="3" width="7" height="5" rx="1.6"/><rect x="14" y="12" width="7" height="9" rx="1.6"/><rect x="3" y="14" width="7" height="7" rx="1.6"/></svg>
+          <span>Dashboard</span>
+        </button>
+        <button id="navMeet" class="nav-btn" data-view="meetings">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5"/><path d="M9.5 13h7M9.5 17h7"/></svg>
+          <span>Meetings</span>
+        </button>
+        <button id="navTasks" class="nav-btn" data-view="tasks">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3.5"/><path d="M8.5 12.5l2.5 2.5 4.5-5"/></svg>
+          <span>Tasks</span>
+          <span id="taskBadge" class="badge" hidden></span>
+        </button>
+        <button id="settingsBtn" class="nav-btn">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg>
+          <span>Settings</span>
+        </button>
+      </nav>
+      <div class="recents">
+        <div class="side-label">Recents</div>
+        <ul id="recents"></ul>
       </div>
+      <button id="liveChip" class="live-chip" hidden>
+        <span class="live-dot"></span>
+        <span id="liveText">Recording</span>
+      </button>
     </aside>
 
-    <main id="main">
-      <div id="empty" class="empty">
-        <h2>No meeting selected</h2>
-        <p>Create a meeting to start tracking it, taking notes and generating the after-meeting agenda.</p>
-      </div>
-
-      <section id="meeting" hidden>
-        <header class="m-head">
-          <div class="m-title">
-            <input id="mTitle" class="title-input" aria-label="Meeting title">
-            <span id="mStatus" class="pill"></span>
-            <span id="mTimer" class="timer">00:00</span>
-          </div>
-          <div class="m-actions">
-            <button id="pauseBtn" hidden>Pause</button>
-            <button id="cornerBtn" hidden title="Shrink to a small always-on-top widget in the screen corner">Minimize to corner</button>
-            <button id="pinBtn" aria-pressed="false" title="Keep this window above all other windows">Pin on top</button>
-            <button id="startBtn" class="primary">Start meeting</button>
-            <button id="stopBtn" class="danger" hidden>End meeting</button>
-            <button id="deleteBtn">Delete</button>
-          </div>
-        </header>
-
-        <div id="banner" class="banner" hidden></div>
-
-        <nav class="tabs">
-          <button id="tabMeeting" class="tab active">Meeting</button>
-          <button id="tabSummary" class="tab">Summary and agenda</button>
-        </nav>
-
-        <div id="paneMeeting" class="pane two-col">
-          <div class="col">
-            <label class="label" for="mAttendees">Attendees</label>
-            <input id="mAttendees" placeholder="Names, separated by commas">
-            <label class="label" for="mAgenda">Planned agenda or context</label>
-            <textarea id="mAgenda" rows="6" placeholder="One item per line"></textarea>
-            <div class="label">Notes</div>
-            <div class="note-add">
-              <input id="noteInput" placeholder="Type a note and press Enter">
-              <button id="noteBtn">Add</button>
-            </div>
-            <ul id="notes" class="notes"></ul>
-          </div>
-          <div class="col">
-            <div class="label">Live transcript</div>
-            <div id="transcript" class="transcript"></div>
-            <p id="pending" class="muted" hidden></p>
-          </div>
+    <div id="content">
+      <header class="topbar">
+        <h2 id="viewTitle">Dashboard</h2>
+        <div class="topbar-right">
+          <button id="calChip" class="cal-chip" title="Calendar connection">Calendar not connected</button>
+          <button id="topNewBtn" class="primary">New meeting</button>
         </div>
+      </header>
 
-        <div id="paneSummary" class="pane" hidden>
-          <div class="gen-bar">
-            <input id="genInstruction" placeholder="Optional instruction, for example: focus on budget and schedule items">
-            <button id="genBtn" class="primary">Generate summary and agenda</button>
+      <!-- ===== Dashboard ===== -->
+      <section id="viewDash" class="view">
+        <div class="dash">
+          <div class="dash-main">
+            <div class="welcome">
+              <div>
+                <h3 id="greet">Good morning</h3>
+                <p id="greetSub" class="muted"></p>
+              </div>
+              <div class="quick">
+                <span class="quick-label">Quick create</span>
+                <button id="qcMeeting">New meeting</button>
+                <button id="qcTask">New task</button>
+              </div>
+            </div>
+
+            <div class="grid2">
+              <article class="card" aria-labelledby="hRecent">
+                <header class="card-h"><h4 id="hRecent">Recent meeting notes</h4><button id="allMeetBtn" class="link" type="button">View all</button></header>
+                <ul id="recentNotes" class="recent-list"></ul>
+                <p id="recentEmpty" class="empty-note" hidden>No meetings yet. Create one to start taking notes.</p>
+              </article>
+
+              <article class="card" aria-labelledby="hTasks">
+                <header class="card-h"><h4 id="hTasks">My task list</h4><button id="allTasksBtn" class="link" type="button">View all</button></header>
+                <div class="seg" role="tablist">
+                  <button id="tdTodo" class="active" role="tab" aria-selected="true">To-do</button>
+                  <button id="tdDone" role="tab" aria-selected="false">Completed</button>
+                </div>
+                <h5 id="tdHeading" class="list-h">Open tasks</h5>
+                <ul id="dashTasks" class="task-list"></ul>
+                <p id="dashTasksEmpty" class="empty-note" hidden></p>
+                <form id="quickTask" class="quick-task">
+                  <input id="quickTaskInput" placeholder="Add a task and press Enter" aria-label="Add a task" maxlength="300">
+                </form>
+              </article>
+            </div>
+
+            <h3 class="section-h">Key summaries and actions</h3>
+            <div class="grid2">
+              <article class="card" aria-labelledby="hProg">
+                <header class="card-h"><h4 id="hProg">Weekly progress</h4></header>
+                <div class="progress-row">
+                  <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-labelledby="hProg" id="progBar"><div id="progFill" class="fill"></div></div>
+                  <span id="progPct" class="pct">0%</span>
+                </div>
+                <p id="progLabel" class="muted prog-label"></p>
+                <ul id="progStats" class="stat-list"></ul>
+                <div id="latestSummary" class="latest" hidden>
+                  <h5 class="list-h">Latest summary</h5>
+                  <div id="latestTitle" class="latest-title"></div>
+                  <p id="latestText" class="latest-text"></p>
+                  <div class="latest-foot"><span id="latestMeta" class="muted"></span><button id="latestOpen" class="link" type="button">Open summary</button></div>
+                </div>
+              </article>
+
+              <article class="card" aria-labelledby="hWeek">
+                <header class="card-h"><h4 id="hWeek">Action items for this week</h4></header>
+                <ul id="weekItems" class="task-list"></ul>
+                <p id="weekEmpty" class="empty-note" hidden></p>
+              </article>
+            </div>
           </div>
-          <div class="export-bar">
-            <button id="copyBtn" class="exp" disabled>Copy Markdown</button>
-            <button id="mdBtn" class="exp" disabled>Export Markdown</button>
-            <button id="pdfBtn" class="exp" disabled>Export PDF</button>
-            <button id="txBtn" class="exp">Export transcript</button>
-          </div>
-          <div id="summary" class="summary"><p class="muted">Nothing generated yet.</p></div>
+
+          <aside class="dash-side">
+            <article class="card calendar" aria-labelledby="hCal">
+              <header class="card-h">
+                <h4 id="hCal">Calendar and upcoming</h4>
+                <button id="calRefresh" class="icon-btn" title="Refresh calendar" aria-label="Refresh calendar">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4v5h-5"/></svg>
+                </button>
+              </header>
+              <div class="cal-nav">
+                <button id="calPrev" class="icon-btn" aria-label="Previous month"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+                <div id="calLabel" class="cal-label">October 2026</div>
+                <button id="calNext" class="icon-btn" aria-label="Next month"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></button>
+              </div>
+              <div class="cal-week" aria-hidden="true"><span>Su</span><span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span></div>
+              <div id="calGrid" class="cal-grid" role="grid" aria-labelledby="calLabel"></div>
+              <div class="cal-foot"><button id="calToday" class="link" type="button">Go to today</button></div>
+            </article>
+
+            <article class="card" aria-labelledby="upTitle">
+              <header class="card-h"><h4 id="upTitle">Upcoming meetings</h4><button id="upBack" class="link" type="button" hidden>Show upcoming</button></header>
+              <ul id="upList" class="up-list"></ul>
+              <p id="upEmpty" class="empty-note" hidden></p>
+              <div id="calConnect" class="connect-box" hidden>
+                <p>Connect your Outlook calendar to see your meetings here, join them in one click, and start notes with the title and attendees filled in.</p>
+                <button id="calConnectBtn" class="primary">Set up calendar</button>
+              </div>
+            </article>
+          </aside>
         </div>
       </section>
-    </main>
+
+      <!-- ===== Meetings ===== -->
+      <section id="viewMeetings" class="view split" hidden>
+        <div id="mlist">
+          <div class="side-top">
+            <button id="newBtn" class="primary">New meeting</button>
+            <input id="search" type="search" placeholder="Search meetings" aria-label="Search meetings">
+          </div>
+          <ul id="list"></ul>
+        </div>
+
+        <main id="main">
+          <div id="empty" class="empty">
+            <h2>No meeting selected</h2>
+            <p>Create a meeting to start tracking it, taking notes and generating the after-meeting agenda.</p>
+          </div>
+
+          <section id="meeting" hidden>
+            <header class="m-head">
+              <div class="m-title">
+                <input id="mTitle" class="title-input" aria-label="Meeting title">
+                <span id="mStatus" class="pill"></span>
+                <span id="mTimer" class="timer">00:00</span>
+              </div>
+              <div class="m-actions">
+                <button id="pauseBtn" hidden>Pause</button>
+                <button id="cornerBtn" hidden title="Shrink to a small always-on-top widget in the screen corner">Minimize to corner</button>
+                <button id="pinBtn" aria-pressed="false" title="Keep this window above all other windows">Pin on top</button>
+                <button id="startBtn" class="primary">Start meeting</button>
+                <button id="stopBtn" class="danger" hidden>End meeting</button>
+                <button id="deleteBtn">Delete</button>
+              </div>
+            </header>
+
+            <div id="banner" class="banner" hidden></div>
+
+            <nav class="tabs">
+              <button id="tabMeeting" class="tab active">Meeting</button>
+              <button id="tabSummary" class="tab">Summary and agenda</button>
+            </nav>
+
+            <div id="paneMeeting" class="pane two-col">
+              <div class="col">
+                <label class="label" for="mAttendees">Attendees</label>
+                <input id="mAttendees" placeholder="Names, separated by commas">
+                <label class="label" for="mAgenda">Planned agenda or context</label>
+                <textarea id="mAgenda" rows="6" placeholder="One item per line"></textarea>
+                <div class="label">Notes</div>
+                <div class="note-add">
+                  <input id="noteInput" placeholder="Type a note and press Enter">
+                  <button id="noteBtn">Add</button>
+                </div>
+                <ul id="notes" class="notes"></ul>
+              </div>
+              <div class="col">
+                <div class="label">Live transcript</div>
+                <div id="transcript" class="transcript"></div>
+                <p id="pending" class="muted" hidden></p>
+              </div>
+            </div>
+
+            <div id="paneSummary" class="pane" hidden>
+              <div class="gen-bar">
+                <input id="genInstruction" placeholder="Optional instruction, for example: focus on budget and schedule items">
+                <button id="genBtn" class="primary">Generate summary and agenda</button>
+              </div>
+              <div class="export-bar">
+                <button id="copyBtn" class="exp" disabled>Copy Markdown</button>
+                <button id="mdBtn" class="exp" disabled>Export Markdown</button>
+                <button id="pdfBtn" class="exp" disabled>Export PDF</button>
+                <button id="txBtn" class="exp">Export transcript</button>
+              </div>
+              <div id="summary" class="summary"><p class="muted">Nothing generated yet.</p></div>
+            </div>
+          </section>
+        </main>
+      </section>
+
+      <!-- ===== Tasks ===== -->
+      <section id="viewTasks" class="view" hidden>
+        <div class="tasks-page">
+          <form id="taskForm" class="task-form">
+            <input id="tTitle" placeholder="New task" aria-label="Task title" maxlength="300" required>
+            <select id="tPriority" aria-label="Priority">
+              <option value="high">High</option>
+              <option value="med" selected>Medium</option>
+              <option value="low">Low</option>
+            </select>
+            <input id="tDue" type="date" aria-label="Due date">
+            <button type="submit" class="primary">Add task</button>
+          </form>
+          <div class="seg task-filters" role="tablist">
+            <button id="tfOpen" class="active" data-filter="open">My open tasks</button>
+            <button id="tfDelegated" data-filter="delegated">Assigned to others</button>
+            <button id="tfDone" data-filter="done">Completed</button>
+            <button id="tfAll" data-filter="all">All</button>
+          </div>
+          <ul id="taskList" class="task-list full"></ul>
+          <p id="taskEmpty" class="empty-note" hidden></p>
+        </div>
+      </section>
+    </div>
   </div>
 
   <div id="statusbar" class="statusbar" hidden></div>
@@ -106,9 +268,52 @@
     </form>
   </dialog>
 
+  <dialog id="olDlg">
+    <h2>Connect Outlook</h2>
+    <p id="olMsg" role="status" aria-live="polite">Contacting Microsoft...</p>
+    <p id="olCode" class="device-code" hidden></p>
+    <p id="olHint" class="muted" hidden>Open Microsoft sign-in, enter this code, and approve read-only access to your calendar.</p>
+    <div class="dlg-actions">
+      <button id="olOpen" type="button" class="primary" hidden>Open Microsoft sign-in</button>
+      <button id="olCancel" type="button">Cancel</button>
+    </div>
+  </dialog>
+
   <dialog id="settingsDlg">
     <form method="dialog" id="settingsForm">
       <h2>Settings</h2>
+
+      <h3>You and your tasks</h3>
+      <label class="label" for="sName">Your name</label>
+      <input id="sName" placeholder="Used for the dashboard greeting and to tell your tasks from other people's">
+      <label class="check"><input type="checkbox" id="sAutoTasks"> Add a meeting's action items to Tasks when a summary is generated</label>
+
+      <h3 id="olSection">Outlook calendar</h3>
+      <p id="olState" class="muted"></p>
+      <label class="label" for="sOlClient">Application (client) ID</label>
+      <input id="sOlClient" autocomplete="off" placeholder="00000000-0000-0000-0000-000000000000">
+      <label class="label" for="sOlTenant">Directory (tenant)</label>
+      <input id="sOlTenant" autocomplete="off" placeholder="common, a tenant ID, or your domain such as company.com">
+      <div class="dlg-actions left">
+        <button type="button" id="olConnect" class="primary">Connect Outlook</button>
+        <button type="button" id="olDisconnect">Disconnect</button>
+      </div>
+      <details class="help">
+        <summary>How to get the Application ID (about five minutes, once)</summary>
+        <ol>
+          <li>Open entra.microsoft.com and go to App registrations, then New registration. Name it MeetNotes.</li>
+          <li>For a work account, choose "Accounts in this organizational directory only". For a personal Outlook.com account, choose the option that includes personal Microsoft accounts. Leave the redirect address empty.</li>
+          <li>Open Authentication and set "Allow public client flows" to Yes. Save.</li>
+          <li>Open API permissions, Add a permission, Microsoft Graph, Delegated, and add Calendars.Read and User.Read. MeetNotes never asks to change your calendar.</li>
+          <li>Copy the Application (client) ID and the Directory (tenant) ID from the Overview page into the two boxes above. Menu names can differ a little between Microsoft portal versions, and some organisations require an administrator to approve the permission.</li>
+        </ol>
+      </details>
+
+      <label class="label" for="sIcs">Or use a published calendar link instead</label>
+      <input id="sIcs" type="password" autocomplete="off" placeholder="Leave blank to keep the saved link">
+      <p id="icsState" class="muted"></p>
+      <div class="dlg-actions left"><button type="button" id="icsTest">Test calendar link</button></div>
+      <p class="muted">In Outlook on the web: Settings, Calendar, Shared calendars, Publish a calendar, then copy the ICS link. The link works like a password for your calendar, so MeetNotes stores it encrypted. Your organisation may not allow publishing.</p>
 
       <h3>Claude and speech</h3>
       <label class="label" for="sKey">Anthropic API key</label>
@@ -173,5 +378,6 @@
   <script src="segmenter.js"></script>
   <script src="capture.js"></script>
   <script src="app.js"></script>
+  <script src="dashboard.js"></script>
 </body>
 </html>

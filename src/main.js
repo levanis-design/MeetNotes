@@ -8,10 +8,18 @@ const ai = require('./ai');
 const render = require('./render');
 const { createUpdates } = require('./updates');
 const layout = require('./mini-layout');
+const links = require('./links');
+const { createTaskStore } = require('./tasks');
+const { createOutlook } = require('./outlook');
+const icsCal = require('./ics');
+const { createServices } = require('./services');
 
 let win = null;
 let mini = null;
 let store = null;
+let tasks = null;
+let outlook = null;
+let services = null;
 let transcriber = null;
 let updates = null;
 
@@ -310,6 +318,7 @@ function registerIpc() {
   ipcMain.handle('settings:get', () => store.getSettings());
   ipcMain.handle('settings:set', (e, patch) => {
     const result = store.setSettings(patch || {});
+    if (patch && ('icsUrl' in patch || 'outlookClientId' in patch || 'outlookTenant' in patch)) services.clearCalendarCache();
     sendMini('mini:settings', miniSettings());
     if (mini && !mini.isDestroyed()) applyMiniBounds();
     return result;
@@ -335,7 +344,7 @@ function registerIpc() {
       defaultId: 0,
       cancelId: 0,
       message: 'Delete all meetings, transcripts and notes?',
-      detail: 'This cannot be undone. Your settings and API key are kept.',
+      detail: 'This cannot be undone. Your settings, tasks and API key are kept.',
     });
     if (r.response !== 1) return false;
     store.wipeAll();
@@ -366,7 +375,17 @@ function registerIpc() {
       meeting,
       instruction,
     });
-    return store.setSummary(id, summary);
+    const saved = store.setSummary(id, summary);
+    let tasksAdded = 0;
+    if (store.getSettings().autoTasks) {
+      try { tasksAdded = tasks.importFromSummary(saved).added; } catch (e) { /* the summary is saved either way */ }
+    }
+    return { ...saved, tasksAdded };
+  });
+
+  ipcMain.handle('shell:open', (e, url) => {
+    if (links.isAllowedExternal(url)) return shell.openExternal(url).then(() => true);
+    return false;
   });
 
   // Rendering and export
@@ -403,11 +422,66 @@ function registerIpc() {
   ipcMain.handle('updates:install', () => updates.install());
   ipcMain.handle('updates:openReleases', () => shell.openExternal('https://github.com/levanis-design/MeetNotes/releases'));
 
+  registerCalendarIpc();
   registerMiniIpc();
+}
+
+// ---------- calendar, tasks and dashboard ----------
+let connecting = false;
+
+function registerCalendarIpc() {
+  // Tasks
+  ipcMain.handle('tasks:list', () => services.listTasks());
+  ipcMain.handle('tasks:add', (e, input) => tasks.add(input || {}));
+  ipcMain.handle('tasks:update', (e, id, patch) => tasks.update(String(id), patch || {}));
+  ipcMain.handle('tasks:remove', (e, id) => { tasks.remove(String(id)); return true; });
+
+  // Dashboard and calendar
+  ipcMain.handle('dashboard:get', (e, opts) => services.dashboard(opts));
+  ipcMain.handle('calendar:events', (e, range) => services.calendarEvents(range));
+  ipcMain.handle('meetings:fromEvent', (e, eventId) => services.meetingFromEvent(eventId));
+
+  // Outlook sign-in (device code flow) and the alternative calendar link
+  ipcMain.handle('outlook:connect', async () => {
+    if (connecting) throw new Error('A sign-in is already in progress.');
+    connecting = true;
+    try {
+      const r = await outlook.connect({
+        onCode: (info) => { if (win && !win.isDestroyed()) win.webContents.send('outlook:code', info); },
+      });
+      store.setOutlookRefresh(store.getOutlookRefresh(), r.account);
+      services.clearCalendarCache();
+      return r;
+    } finally {
+      connecting = false;
+    }
+  });
+  ipcMain.handle('outlook:cancel', () => { outlook.cancel(); return true; });
+  ipcMain.handle('outlook:disconnect', () => { outlook.disconnect(); services.clearCalendarCache(); return true; });
+  ipcMain.handle('ics:test', async () => {
+    const url = store.getIcsUrl();
+    if (!url) throw new Error('No calendar link saved.');
+    const from = new Date();
+    const to = new Date(Date.now() + 14 * 24 * 3600 * 1000);
+    const events = await icsCal.fetchEvents(url, from, to);
+    services.clearCalendarCache();
+    return { count: events.length };
+  });
+
 }
 
 app.whenReady().then(() => {
   store = createStore(app.getPath('userData'), cipher);
+  tasks = createTaskStore(app.getPath('userData'));
+  outlook = createOutlook({
+    getConfig: () => {
+      const s = store.getSettings();
+      return { clientId: s.outlookClientId, tenant: s.outlookTenant };
+    },
+    loadRefresh: () => store.getOutlookRefresh(),
+    saveRefresh: (t) => store.setOutlookRefresh(t),
+  });
+  services = createServices({ store, tasks, outlook });
   updates = createUpdates({
     updater: app.isPackaged ? require('electron-updater').autoUpdater : null,
     version: app.getVersion(),

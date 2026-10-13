@@ -2,6 +2,8 @@
 
 ## Verified
 
+Version 1.3.0 adds a dashboard, local tasks and read-only calendar integration. Tests cover recurrence, time zones, canceled sign-in, stale response protection, calendar-to-note reuse, and encrypted calendar settings. Desktop checks cover task entry and completion.
+
 Storage, encryption boundary, summary normalization, escaped exports, the update state machine, widget layout and settings validation are covered by automated tests. Additional regressions cover audio cleanup and worker disposal.
 
 The real Electron app was tested with isolated test data: meeting creation, field editing, note entry, PDF/Markdown/text export, widget creation, always-on-top and recording lifecycle with fake audio capture.
@@ -12,6 +14,7 @@ The real public GitHub update feed was tested with the Electron updater: version
 
 ## Remaining live checks
 
+- Connect a real Microsoft account or published ICS calendar and confirm calendar events, account consent and Join links.
 - Record a short call with microphone and Windows loopback audio; confirm both sources, pause/resume, minimization, and the final transcript.
 - Generate a summary using your Anthropic key, including a long meeting and a failed network request.
 - Check, download and install an update between two installed Windows versions.

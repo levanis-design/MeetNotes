@@ -27,7 +27,8 @@ Respond with one JSON object only, no markdown fences and no commentary, using e
   "follow_up_agenda": {"title": "", "objective": "", "items": [{"topic": "", "purpose": "", "owner": "", "minutes": 0}]},
   "missing_information": [""]
 }
-Use "${TBC}" for owner, due or priority when not stated or not clearly implied.`;
+Use "${TBC}" for owner, due or priority when not stated or not clearly implied.
+For "due", write a date as YYYY-MM-DD when a specific date is stated, or when a relative date such as "Friday" or "next Tuesday" can be resolved with certainty from the meeting start date given in the input. Otherwise write "${TBC}". For "priority", use high, med or low only when it is stated or clearly implied.`;
 
 function mmss(sec) {
   if (typeof sec !== 'number' || !isFinite(sec)) return '--:--';

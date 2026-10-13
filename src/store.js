@@ -3,9 +3,18 @@
 const fs = require('fs');
 const path = require('path');
 const { isCorner, isSize } = require('./mini-layout');
+const { normalizeIcsUrl } = require('./links');
 
 const ID_PATTERN = /^m_\d+$/;
-const UPDATABLE = ['title', 'attendees', 'agendaPre', 'status', 'startedAt', 'endedAt', 'elapsedSec', 'notes'];
+const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const TENANT = /^[A-Za-z0-9][A-Za-z0-9.-]{0,98}$/;
+const TBC = /^data to be confirmed$/i;
+
+function snippet(text, n) {
+  const t = String(text || '').replace(/\s+/g, ' ').trim();
+  return t.length > n ? t.slice(0, n - 1).trimEnd() + '…' : t;
+}
+const UPDATABLE = ['title', 'attendees', 'agendaPre', 'status', 'startedAt', 'endedAt', 'elapsedSec', 'notes', 'calendarEventId'];
 
 function writeAtomic(file, data) {
   const tmp = file + '.tmp';
@@ -28,6 +37,13 @@ function createStore(baseDir, cipher) {
     miniSize: 'pill',        // 'card', 'pill' or 'dot'
     autoMini: true,
     mainAlwaysOnTop: false,
+    myName: '',
+    autoTasks: true,
+    outlookClientId: '',
+    outlookTenant: 'common',
+    outlookTokenEnc: null,
+    outlookAccount: '',
+    icsUrlEnc: null,
   };
 
   function readSettings() {
@@ -58,11 +74,31 @@ function createStore(baseDir, cipher) {
       miniSize: s.miniSize,
       autoMini: s.autoMini,
       mainAlwaysOnTop: s.mainAlwaysOnTop,
+      myName: s.myName,
+      autoTasks: s.autoTasks,
+      outlookClientId: s.outlookClientId,
+      outlookTenant: s.outlookTenant,
+      hasOutlook: Boolean(s.outlookTokenEnc),
+      outlookAccount: s.outlookAccount,
+      hasIcs: Boolean(s.icsUrlEnc),
     };
   }
 
   function setSettings(patch) {
     const s = readSettings();
+    // Validate calendar fields first so a bad value changes nothing.
+    let icsEnc;
+    if (typeof patch.icsUrl === 'string') {
+      icsEnc = patch.icsUrl.trim() ? cipher.encrypt(normalizeIcsUrl(patch.icsUrl)) : null;
+    }
+    if (typeof patch.outlookClientId === 'string') {
+      const v = patch.outlookClientId.trim();
+      if (v && !GUID.test(v)) throw new Error('The Application (client) ID should look like 00000000-0000-0000-0000-000000000000.');
+    }
+    if (typeof patch.outlookTenant === 'string') {
+      const v = patch.outlookTenant.trim() || 'common';
+      if (!TENANT.test(v)) throw new Error('The Directory (tenant) value should be a tenant ID, a domain name, or "common".');
+    }
     if (typeof patch.model === 'string' && patch.model.trim()) s.model = patch.model.trim();
     if (typeof patch.whisperModel === 'string' && patch.whisperModel.trim()) s.whisperModel = patch.whisperModel.trim();
     if (typeof patch.apiKey === 'string') {
@@ -76,6 +112,20 @@ function createStore(baseDir, cipher) {
     if (isSize(patch.miniSize)) s.miniSize = patch.miniSize;
     if (typeof patch.autoMini === 'boolean') s.autoMini = patch.autoMini;
     if (typeof patch.mainAlwaysOnTop === 'boolean') s.mainAlwaysOnTop = patch.mainAlwaysOnTop;
+    if (typeof patch.myName === 'string') s.myName = patch.myName.trim().slice(0, 80);
+    if (typeof patch.autoTasks === 'boolean') s.autoTasks = patch.autoTasks;
+    // Changing the app registration or directory makes the saved Outlook sign-in invalid.
+    if (typeof patch.outlookClientId === 'string') {
+      const v = patch.outlookClientId.trim();
+      if (v !== s.outlookClientId) { s.outlookTokenEnc = null; s.outlookAccount = ''; }
+      s.outlookClientId = v;
+    }
+    if (typeof patch.outlookTenant === 'string') {
+      const v = patch.outlookTenant.trim() || 'common';
+      if (v !== s.outlookTenant) { s.outlookTokenEnc = null; s.outlookAccount = ''; }
+      s.outlookTenant = v;
+    }
+    if (icsEnc !== undefined) s.icsUrlEnc = icsEnc;
     writeAtomic(settingsFile, JSON.stringify(s, null, 2));
     return getSettings();
   }
@@ -83,6 +133,22 @@ function createStore(baseDir, cipher) {
   function getApiKey() {
     const s = readSettings();
     return s.apiKeyEnc ? cipher.decrypt(s.apiKeyEnc) : null;
+  }
+
+  function getOutlookRefresh() {
+    const s = readSettings();
+    return s.outlookTokenEnc ? cipher.decrypt(s.outlookTokenEnc) : null;
+  }
+  function setOutlookRefresh(token, account) {
+    const s = readSettings();
+    s.outlookTokenEnc = token ? cipher.encrypt(token) : null;
+    if (!token) s.outlookAccount = '';
+    else if (typeof account === 'string') s.outlookAccount = account.slice(0, 200);
+    writeAtomic(settingsFile, JSON.stringify(s, null, 2));
+  }
+  function getIcsUrl() {
+    const s = readSettings();
+    return s.icsUrlEnc ? cipher.decrypt(s.icsUrlEnc) : null;
   }
 
   function fileFor(id) {
@@ -99,7 +165,7 @@ function createStore(baseDir, cipher) {
     return meeting;
   }
 
-  function create({ title, attendees, agendaPre } = {}) {
+  function create({ title, attendees, agendaPre, calendarEventId } = {}) {
     let n = Date.now();
     while (fs.existsSync(path.join(meetingsDir, `m_${n}.json`))) n += 1;
     const meeting = {
@@ -116,8 +182,22 @@ function createStore(baseDir, cipher) {
       notes: [],
       summary: null,
       generatedAt: null,
+      calendarEventId: typeof calendarEventId === 'string' && calendarEventId ? calendarEventId : null,
     };
     return write(meeting);
+  }
+
+  function excerptFor(m) {
+    const sum = m.summary && m.summary.executive_summary;
+    if (sum && !TBC.test(sum)) return snippet(sum, 150);
+    if ((m.notes || []).length) return snippet(m.notes[0].text, 150);
+    const tx = (m.transcript || []).slice().sort((a, b) => a.t - b.t)[0];
+    if (tx) return snippet(tx.text, 150);
+    return snippet((m.agendaPre || '').split('\n')[0], 150);
+  }
+
+  function findByCalendarEvent(eventId) {
+    return list().find((m) => m.calendarEventId === eventId) || null;
   }
 
   function list() {
@@ -134,6 +214,12 @@ function createStore(baseDir, cipher) {
           startedAt: m.startedAt,
           endedAt: m.endedAt,
           hasSummary: Boolean(m.summary),
+          generatedAt: m.generatedAt || null,
+          calendarEventId: m.calendarEventId || null,
+          decisions: m.summary ? (m.summary.decisions || []).length : 0,
+          actions: m.summary ? (m.summary.action_items || []).length : 0,
+          summaryText: m.summary && !TBC.test(m.summary.executive_summary || '') ? snippet(m.summary.executive_summary, 280) : '',
+          excerpt: excerptFor(m),
         });
       } catch {
         // skip unreadable file
@@ -184,7 +270,7 @@ function createStore(baseDir, cipher) {
   }
 
   return {
-    getSettings, setSettings, getApiKey,
+    getSettings, setSettings, getApiKey, getOutlookRefresh, setOutlookRefresh, getIcsUrl, findByCalendarEvent,
     create, list, get, update, appendTranscript, addNote, setSummary, remove, wipeAll,
   };
 }

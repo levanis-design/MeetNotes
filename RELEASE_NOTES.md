@@ -1,19 +1,25 @@
-# MeetNotes v1.2.0
+# MeetNotes v1.3.0
 
-## Changes
+## New features
 
-- Removed publishing meeting summaries and transcripts to GitHub, including token setup, repository preferences and publishing history in the interface.
-- Added Settings > App updates: check GitHub Releases, download an update, then confirm restart and installation.
-- Updates come from levanis-design/MeetNotes. No GitHub login or token is required.
-- Updates are blocked while a meeting is recording. Updates are not downloaded or installed automatically.
-- Upgrading removes obsolete saved publishing credentials while keeping meetings and the Anthropic key.
-- Added a Windows release workflow that publishes the installer, blockmap and latest.yml update metadata.
-- Updated the README with privacy, update and release instructions.
+- Dashboard with recent meeting notes, weekly progress, latest summaries and upcoming meetings.
+- Local task list with priorities, due dates, completion and automatic imports from summary action items.
+- Read-only Outlook calendar via Microsoft device-code sign-in, or a published ICS calendar link.
+- Calendar navigation, supported meeting-service Join links, and notes prefilled from calendar events.
 
-## Installation
+## Verification fixes and retained behavior
 
-Install `MeetNotes-Setup-1.2.0.exe` once to switch from 1.1.0, which has no updater. Future versions can be installed from Settings > App updates.
+- Kept GitHub app updates and excluded publishing of meeting content.
+- Kept the prior audio cleanup, worker queuing, field-saving and recording-transition fixes.
+- Fixed canceled Outlook sign-in continuing after a network response.
+- Fixed stale calendar responses overwriting newer requests or repopulating a cleared cache.
+- Preserved all-day calendar dates using the original time zone, including Windows names and extreme UTC offsets.
+- Updated README setup, privacy and update instructions.
 
-## Validation and remaining checks
+## Install or update
 
-The automated suite covers storage, exports, audio cleanup and the update lifecycle, recording guards, duplicate operations, failure recovery and credential migration. Desktop and package smoke checks cover the interface and local transcription. The real public GitHub update feed, installer download and checksum verification pass. A complete restart/install upgrade on an installed Windows app still needs verification. Live meeting audio and Claude calls also require your real-session check. The installer remains unsigned.
+Install `MeetNotes-Setup-1.3.0.exe`, or use Settings > App updates in version 1.2.0. Local meetings and settings are preserved. No GitHub account or token is required for updates.
+
+## Validation
+
+51 automated tests pass. Desktop checks cover dashboard/task entry and completion, meeting editing, exports, widget and recording lifecycle with simulated audio. Real Outlook sign-in, organisation-specific consent, meeting audio, Claude calls and a full restart/install upgrade still require verification on your setup. The installer remains unsigned.

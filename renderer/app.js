@@ -19,6 +19,8 @@
     settings: null,
     transitioning: false,
     updates: null,
+    view: 'dashboard',
+    olVerify: null,
   };
 
   // ---------- helpers ----------
@@ -52,6 +54,35 @@
     return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
   }
   const isLive = () => state.cur && state.cur.status === 'live';
+  const dash = () => window.MNDash || null;
+
+  // ---------- views ----------
+  const VIEWS = { dashboard: 'viewDash', meetings: 'viewMeetings', tasks: 'viewTasks' };
+  const TITLES = { dashboard: 'Dashboard', meetings: 'Meetings', tasks: 'Tasks' };
+  function showView(name) {
+    if (!VIEWS[name]) return;
+    state.view = name;
+    for (const [v, id] of Object.entries(VIEWS)) $(id).hidden = v !== name;
+    document.querySelectorAll('.nav-btn[data-view]').forEach((b) => b.classList.toggle('active', b.dataset.view === name));
+    $('viewTitle').textContent = TITLES[name];
+    if (dash()) dash().onView(name);
+  }
+
+  function updateLiveChip() {
+    const chip = $('liveChip');
+    const live = isLive();
+    chip.hidden = !live;
+    if (!live) return;
+    chip.classList.toggle('paused', state.paused);
+    $('liveText').textContent = `${state.paused ? 'Paused' : 'Recording'} ${fmt(elapsed())}`;
+  }
+
+  function openNewDialog() {
+    if (isLive() || state.transitioning) return toast('End the current meeting before creating another one.', true);
+    $('newForm').reset();
+    $('newDlg').showModal();
+    $('nTitle').focus();
+  }
 
   // ---------- floating widget sync ----------
   function pushMini() {
@@ -72,6 +103,22 @@
   async function loadList() {
     state.meetings = await api.listMeetings();
     renderList();
+    renderRecents();
+    if (dash()) dash().dataChanged();
+  }
+  function renderRecents() {
+    const ul = $('recents');
+    ul.textContent = '';
+    for (const m of state.meetings.slice(0, 3)) {
+      const li = document.createElement('li');
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = m.title;
+      b.title = m.title;
+      b.addEventListener('click', () => openMeeting(m.id));
+      li.append(b);
+      ul.append(li);
+    }
   }
   function renderList() {
     const q = $('search').value.trim().toLowerCase();
@@ -96,7 +143,7 @@
   }
 
   // ---------- meeting view ----------
-  async function openMeeting(id) {
+  async function openMeeting(id, opts) {
     if (state.transitioning) return toast('Please wait for recording to finish starting or stopping.', true);
     if (isLive() && state.cur.id !== id) {
       toast('End the current meeting before opening another one.', true);
@@ -114,13 +161,27 @@
     if (!isLive()) state.base = m.elapsedSec || 0;
     renderMeeting();
     renderList();
+    showView('meetings');
+    if (opts && opts.tab) showTab(opts.tab);
+  }
+
+  async function openMeetingFromEvent(eventId) {
+    if (isLive() || state.transitioning) return toast('End the current meeting before starting notes for another one.', true);
+    try {
+      const r = await api.meetingFromEvent(eventId);
+      await loadList();
+      await openMeeting(r.id, { tab: 'meeting' });
+      if (r.created) toast('Notes created from the calendar event. Press Start meeting when you are ready to record.');
+    } catch (e) {
+      toast(errText(e), true, 7000);
+    }
   }
 
   function renderMeeting() {
     const m = state.cur;
     $('empty').hidden = Boolean(m);
     $('meeting').hidden = !m;
-    if (!m) return;
+    if (!m) { updateLiveChip(); return; }
     $('mTitle').value = m.title;
     $('mAttendees').value = m.attendees || '';
     $('mAgenda').value = m.agendaPre || '';
@@ -146,6 +207,7 @@
     $('cornerBtn').hidden = !live;
     $('deleteBtn').disabled = live;
     if (state.updates) renderUpdateState(state.updates);
+    updateLiveChip();
     const banner = $('banner');
     if (live || m.status === 'planned') {
       banner.hidden = false;
@@ -270,7 +332,7 @@
       const patch = { status: 'live', startedAt: m.startedAt || new Date().toISOString(), endedAt: null };
       await api.updateMeeting(m.id, patch);
       Object.assign(m, patch);
-      state.timer = setInterval(() => { $('mTimer').textContent = fmt(elapsed()); }, 500);
+      state.timer = setInterval(() => { $('mTimer').textContent = fmt(elapsed()); updateLiveChip(); }, 500);
       state.levelTimer = setInterval(() => api.miniLevels({ ...state.levels }), 120);
       state.syncTimer = setInterval(pushMini, 15000);
       updateControls();
@@ -348,6 +410,7 @@
       state.cur = await api.getMeeting(m.id);
       renderMeeting();
       showTab('summary');
+      showView('meetings');
       toast('Meeting ended. Generate the summary and after-meeting agenda when ready.');
       loadList();
     } catch (e) {
@@ -365,12 +428,12 @@
     toast('Generating summary and agenda...', false, 0);
     try {
       const updated = await api.generate(m.id, $('genInstruction').value);
-      if (state.cur && state.cur.id === m.id) {
-        state.cur = updated;
-        await renderSummary();
-      }
+      if (state.cur && state.cur.id === m.id) { state.cur = updated; await renderSummary(); }
       hideToast();
+      const added = updated.tasksAdded || 0;
+      toast(added ? `Summary ready. ${added} action item${added === 1 ? '' : 's'} added to Tasks.` : 'Summary ready.');
       loadList();
+      if (dash()) dash().tasksChanged();
     } catch (e) {
       hideToast();
       toast(errText(e), true, 9000);
@@ -436,9 +499,26 @@
   }
 
   // ---------- settings ----------
-  async function openSettings() {
+  function outlookStateText(s) {
+    if (s.hasOutlook) return `Connected${s.outlookAccount ? ' as ' + s.outlookAccount : ''}. MeetNotes can only read your calendar.`;
+    return s.hasIcs ? 'Not signed in. The calendar link below is being used.' : 'Not connected.';
+  }
+  function refreshCalendarSettings(s) {
+    $('olState').textContent = outlookStateText(s);
+    $('olConnect').textContent = s.hasOutlook ? 'Reconnect Outlook' : 'Connect Outlook';
+    $('olDisconnect').hidden = !s.hasOutlook;
+    $('icsState').textContent = s.hasIcs ? 'A calendar link is saved on this computer.' : 'No calendar link saved.';
+  }
+
+  async function openSettings(section) {
     const s = await api.getSettings();
     state.settings = s;
+    $('sName').value = s.myName || '';
+    $('sAutoTasks').checked = s.autoTasks;
+    $('sOlClient').value = s.outlookClientId || '';
+    $('sOlTenant').value = s.outlookTenant || 'common';
+    $('sIcs').value = '';
+    refreshCalendarSettings(s);
     $('sKey').value = '';
     $('sModel').value = s.model;
     $('sWhisper').value = s.whisperModel;
@@ -451,6 +531,7 @@
     $('sAutoMini').checked = s.autoMini;
     renderUpdateState(await api.getUpdateState());
     $('settingsDlg').showModal();
+    if (section === 'calendar') $('olSection').scrollIntoView();
   }
   async function saveSettings() {
     const patch = {
@@ -461,19 +542,27 @@
       miniSize: $('sMiniSize').value,
       miniCorner: $('sMiniCorner').value,
       autoMini: $('sAutoMini').checked,
+      myName: $('sName').value,
+      autoTasks: $('sAutoTasks').checked,
+      outlookClientId: $('sOlClient').value,
+      outlookTenant: $('sOlTenant').value,
     };
+    const ics = $('sIcs').value.trim();
+    if (ics) patch.icsUrl = ics;
     const key = $('sKey').value.trim();
     if (key) patch.apiKey = key;
     state.settings = await api.setSettings(patch);
+    if (ics) $('sIcs').value = '';
+    refreshCalendarSettings(state.settings);
+    if (dash()) dash().refresh(true);
   }
 
   // ---------- wire up ----------
-  $('newBtn').addEventListener('click', () => {
-    if (isLive() || state.transitioning) return toast('End the current meeting before creating another one.', true);
-    $('newForm').reset();
-    $('newDlg').showModal();
-    $('nTitle').focus();
-  });
+  $('newBtn').addEventListener('click', openNewDialog);
+  $('topNewBtn').addEventListener('click', openNewDialog);
+  document.querySelectorAll('.nav-btn[data-view]').forEach((b) => b.addEventListener('click', () => showView(b.dataset.view)));
+  $('liveChip').addEventListener('click', () => showView('meetings'));
+  $('calChip').addEventListener('click', () => openSettings('calendar'));
   $('nCancel').addEventListener('click', () => $('newDlg').close());
   $('newForm').addEventListener('submit', async () => {
     const m = await api.createMeeting({
@@ -523,7 +612,7 @@
   $('pdfBtn').addEventListener('click', () => runExport(api.exportPdf, 'PDF'));
   $('txBtn').addEventListener('click', () => runExport(api.exportTranscript, 'Transcript'));
 
-  $('settingsBtn').addEventListener('click', openSettings);
+  $('settingsBtn').addEventListener('click', () => openSettings());
   $('updateCheck').addEventListener('click', () => updateAction(api.checkUpdates));
   $('updateDownload').addEventListener('click', () => updateAction(api.downloadUpdate));
   $('updateInstall').addEventListener('click', () => {
@@ -533,7 +622,14 @@
   $('updateReleases').addEventListener('click', () => api.openReleases());
   api.onUpdateStatus(renderUpdateState);
   $('sCancel').addEventListener('click', () => $('settingsDlg').close());
-  $('settingsForm').addEventListener('submit', async () => { await saveSettings(); toast('Settings saved'); });
+  $('settingsForm').addEventListener('submit', async (e) => {
+    e.preventDefault(); // stay open if a value is rejected
+    try {
+      await saveSettings();
+      $('settingsDlg').close();
+      toast('Settings saved');
+    } catch (err) { toast(errText(err), true, 9000); }
+  });
   $('sMiniOpacity').addEventListener('input', (e) => { $('sMiniOpacityVal').textContent = e.target.value + '%'; });
   $('sPreview').addEventListener('click', async () => {
     try {
@@ -552,6 +648,67 @@
       toast('The API key works.');
     } catch (e) { toast('Key test failed: ' + errText(e), true, 8000); }
   });
+  // ---------- Outlook sign-in ----------
+  function olReset() {
+    $('olMsg').textContent = 'Contacting Microsoft...';
+    $('olCode').hidden = true;
+    $('olHint').hidden = true;
+    $('olOpen').hidden = true;
+    $('olCancel').textContent = 'Cancel';
+  }
+  api.onOutlookCode((info) => {
+    state.olVerify = info.verificationUri;
+    $('olMsg').textContent = 'Sign in with this code:';
+    $('olCode').textContent = info.userCode;
+    $('olCode').hidden = false;
+    $('olHint').hidden = false;
+    $('olOpen').hidden = false;
+  });
+  $('olConnect').addEventListener('click', async () => {
+    try {
+      await saveSettings(); // saves the client ID and tenant first
+    } catch (e) { return toast(errText(e), true, 9000); }
+    olReset();
+    $('olDlg').showModal();
+    try {
+      const r = await api.outlookConnect();
+      if ($('olDlg').open) $('olDlg').close();
+      const s = await api.getSettings();
+      state.settings = s;
+      refreshCalendarSettings(s);
+      toast(`Outlook connected${r && r.account ? ' as ' + r.account : ''}.`);
+      if (dash()) dash().refresh(true);
+    } catch (e) {
+      if ($('olDlg').open) {
+        $('olMsg').textContent = errText(e);
+        $('olCode').hidden = true;
+        $('olHint').hidden = true;
+        $('olOpen').hidden = true;
+        $('olCancel').textContent = 'Close';
+      }
+    }
+  });
+  $('olOpen').addEventListener('click', () => { if (state.olVerify) api.openExternal(state.olVerify); });
+  $('olCancel').addEventListener('click', () => $('olDlg').close());
+  $('olDlg').addEventListener('close', () => { api.outlookCancel(); });
+  $('olDisconnect').addEventListener('click', async () => {
+    await api.outlookDisconnect();
+    const s = await api.getSettings();
+    state.settings = s;
+    refreshCalendarSettings(s);
+    toast('Outlook disconnected.');
+    if (dash()) dash().refresh(true);
+  });
+  $('icsTest').addEventListener('click', async () => {
+    try {
+      await saveSettings();
+      toast('Testing the calendar link...', false, 0);
+      const r = await api.testIcs();
+      toast(`The calendar link works. ${r.count} event${r.count === 1 ? '' : 's'} in the next two weeks.`);
+      if (dash()) dash().refresh(true);
+    } catch (e) { toast('Calendar link test failed: ' + errText(e), true, 9000); }
+  });
+
   $('sWipe').addEventListener('click', async () => {
     if (isLive() || state.transitioning) return toast('End the current meeting first.', true);
     if (await api.wipeAll()) {
@@ -583,6 +740,13 @@
     else if (name === 'stop') stopMeeting();
   });
 
+  window.MN = {
+    toast, errText, openMeeting, openMeetingFromEvent, showView, openNewDialog, openSettings, isLive,
+    meetingIdForEvent: (eventId) => { const m = state.meetings.find((x) => x.calendarEventId === eventId); return m ? m.id : null; },
+    meetingTitle: (id) => { const m = state.meetings.find((x) => x.id === id); return m ? m.title : ''; },
+  };
+
   api.getSettings().then((s) => { state.settings = s; setPinned(Boolean(s.mainAlwaysOnTop)); });
   loadList();
+  if (dash()) dash().onView(state.view);
 })();
