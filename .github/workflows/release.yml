@@ -5,6 +5,9 @@ on:
   workflow_dispatch:
 permissions:
   contents: write
+concurrency:
+  group: meetnotes-windows-releases
+  cancel-in-progress: false
 jobs:
   release:
     runs-on: windows-latest
@@ -39,5 +42,9 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Could not upload release files" }
           gh release edit $tag --draft=false --prerelease=false --latest --notes-file RELEASE_NOTES.md
           if ($LASTEXITCODE -ne 0) { throw "Could not publish release" }
+          $assets = gh release view $tag --json assets --jq '.assets[].name'
+          foreach ($asset in @("MeetNotes-Setup-$version.exe", "MeetNotes-Setup-$version.exe.blockmap", 'latest.yml')) {
+            if ($asset -notin $assets) { throw "Published release is missing $asset" }
+          }
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
