@@ -1,0 +1,18 @@
+'use strict';
+const fs = require('node:fs');
+const path = require('node:path');
+const crypto = require('node:crypto');
+const assert = require('node:assert/strict');
+const { version } = require('../package.json');
+const manifest = fs.readFileSync('dist/latest.yml', 'utf8');
+const exe = `MeetNotes-Setup-${version}.exe`;
+assert.ok(manifest.includes(`version: ${version}`), 'update version matches package.json');
+assert.ok(manifest.includes(`url: ${exe}`), 'metadata points at expected installer');
+const original = path.join('dist', `MeetNotes Setup ${version}.exe`);
+const hash = crypto.createHash('sha512').update(fs.readFileSync(original)).digest('base64');
+assert.ok(manifest.includes(`sha512: ${hash}`), 'metadata checksum matches installer');
+const blockmap = original + '.blockmap';
+assert.ok(fs.statSync(blockmap).size > 0, 'blockmap exists');
+fs.copyFileSync(original, path.join('dist', exe));
+fs.copyFileSync(blockmap, path.join('dist', exe + '.blockmap'));
+console.log('PASS: release version, installer SHA-512, metadata filename and blockmap.');

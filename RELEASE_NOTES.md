@@ -12,7 +12,7 @@
 
 ## Installation
 
-Install `MeetNotes Setup 1.2.0.exe` once to switch from 1.1.0, which has no updater. Future versions can be installed from Settings > App updates.
+Install `MeetNotes-Setup-1.2.0.exe` once to switch from 1.1.0, which has no updater. Future versions can be installed from Settings > App updates.
 
 ## Validation and remaining checks
 
