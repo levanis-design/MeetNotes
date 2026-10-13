@@ -18,6 +18,7 @@
     levels: { you: 0, others: 0 },
     settings: null,
     transitioning: false,
+    updates: null,
   };
 
   // ---------- helpers ----------
@@ -87,7 +88,7 @@
       s.className = 'li-sub';
       const d = new Date(m.startedAt || m.createdAt);
       const label = m.status === 'live' ? 'Live' : m.status === 'ended' ? (m.hasSummary ? 'Summarized' : 'Ended') : 'Planned';
-      s.textContent = `${label}${m.published ? ' · On GitHub' : ''} · ${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+      s.textContent = `${label} · ${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
       li.append(t, s);
       li.addEventListener('click', () => openMeeting(m.id));
       ul.append(li);
@@ -144,6 +145,7 @@
     $('pauseBtn').classList.toggle('resume', state.paused);
     $('cornerBtn').hidden = !live;
     $('deleteBtn').disabled = live;
+    if (state.updates) renderUpdateState(state.updates);
     const banner = $('banner');
     if (live || m.status === 'planned') {
       banner.hidden = false;
@@ -203,16 +205,7 @@
     $('copyBtn').disabled = !has;
     $('mdBtn').disabled = !has;
     $('pdfBtn').disabled = !has;
-    $('ghBtn').disabled = !has;
     $('genBtn').textContent = has ? 'Regenerate summary and agenda' : 'Generate summary and agenda';
-    const info = $('ghInfo');
-    if (m.github) {
-      info.hidden = false;
-      const when = new Date(m.github.publishedAt);
-      $('ghText').textContent = `Published to ${m.github.repo}${isNaN(when) ? '' : ' on ' + when.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
-    } else {
-      info.hidden = true;
-    }
     const box = $('summary');
     if (!has) {
       box.innerHTML = '<p class="muted">Nothing generated yet. End the meeting, then generate the summary and after-meeting agenda.</p>';
@@ -395,47 +388,6 @@
     }
   }
 
-  // ---------- GitHub ----------
-  async function openGithubDialog() {
-    const s = await api.getSettings();
-    state.settings = s;
-    const m = state.cur;
-    $('ghRepo').value = (m.github && m.github.repo) || s.githubRepo || 'meeting-notes';
-    document.querySelector('input[name="ghVis"][value="' + (s.githubPrivate ? 'private' : 'public') + '"]').checked = true;
-    $('ghTranscript').checked = false;
-    $('ghGo').disabled = !s.hasGithubToken;
-    $('ghNote').textContent = !s.hasGithubToken
-      ? 'Add a GitHub token in Settings first.'
-      : m.github
-        ? 'This meeting was published before. Publishing again updates the same files.'
-        : 'Meeting content can be confidential. Private is the safe choice.';
-    $('ghDlg').showModal();
-  }
-
-  async function publishToGithub() {
-    const m = state.cur;
-    const payload = {
-      id: m.id,
-      repoName: $('ghRepo').value.trim(),
-      isPrivate: document.querySelector('input[name="ghVis"]:checked').value === 'private',
-      includeTranscript: $('ghTranscript').checked,
-    };
-    toast('Publishing to GitHub...', false, 0);
-    try {
-      const rec = await api.publishGithub(payload);
-      if (!rec) { hideToast(); return; } // cancelled at the public-repository warning
-      if (state.cur && state.cur.id === m.id) {
-        state.cur.github = rec;
-        await renderSummary();
-      }
-      toast(`Published to ${rec.repo}`);
-      loadList();
-    } catch (e) {
-      hideToast();
-      toast(errText(e), true, 12000);
-    }
-  }
-
   // ---------- window options ----------
   function setPinned(on) {
     const b = $('pinBtn');
@@ -453,6 +405,36 @@
     $('tabSummary').classList.toggle('active', s);
   }
 
+  // ---------- app updates ----------
+  function renderUpdateState(update) {
+    state.updates = update;
+    const labels = {
+      idle: 'Check GitHub for a newer app version.',
+      development: 'App updates are available in the installed Windows app. Use View releases for an installer.',
+      checking: 'Checking for updates...',
+      current: 'You have the latest version.',
+      available: `Version ${update.version} is available.`,
+      downloading: `Downloading version ${update.version}: ${update.percent}%`,
+      downloaded: `Version ${update.version} is ready. Restart to install it.`,
+      installing: 'Restarting to install the update...',
+      error: `Update failed: ${update.message}. Check your connection and try again, or use View releases.`,
+    };
+    $('updateStatus').textContent = `MeetNotes ${update.currentVersion}. ${labels[update.status] || ''}`;
+    const busy = isLive() || state.transitioning || ['checking', 'downloading', 'installing'].includes(update.status);
+    $('updateCheck').disabled = busy || update.status === 'development';
+    $('updateDownload').hidden = update.status !== 'available';
+    $('updateDownload').disabled = busy;
+    $('updateInstall').hidden = update.status !== 'downloaded';
+    $('updateInstall').disabled = busy;
+  }
+  async function updateAction(action) {
+    if (isLive() || state.transitioning) return toast('End the current meeting before updating the app.', true);
+    try {
+      const result = await action();
+      if (result && typeof result === 'object') renderUpdateState(result);
+    } catch (error) { toast(errText(error), true, 9000); }
+  }
+
   // ---------- settings ----------
   async function openSettings() {
     const s = await api.getSettings();
@@ -467,10 +449,7 @@
     $('sMiniSize').value = s.miniSize;
     $('sMiniCorner').value = s.miniCorner;
     $('sAutoMini').checked = s.autoMini;
-    $('sGhToken').value = '';
-    $('ghTokenState').textContent = s.hasGithubToken ? 'A GitHub token is saved on this computer.' : 'No GitHub token saved yet.';
-    $('sGhRepo').value = s.githubRepo;
-    $('sGhPrivate').value = s.githubPrivate ? 'private' : 'public';
+    renderUpdateState(await api.getUpdateState());
     $('settingsDlg').showModal();
   }
   async function saveSettings() {
@@ -482,13 +461,9 @@
       miniSize: $('sMiniSize').value,
       miniCorner: $('sMiniCorner').value,
       autoMini: $('sAutoMini').checked,
-      githubRepo: $('sGhRepo').value,
-      githubPrivate: $('sGhPrivate').value === 'private',
     };
     const key = $('sKey').value.trim();
     if (key) patch.apiKey = key;
-    const token = $('sGhToken').value.trim();
-    if (token) patch.githubToken = token;
     state.settings = await api.setSettings(patch);
   }
 
@@ -548,14 +523,15 @@
   $('pdfBtn').addEventListener('click', () => runExport(api.exportPdf, 'PDF'));
   $('txBtn').addEventListener('click', () => runExport(api.exportTranscript, 'Transcript'));
 
-  $('ghBtn').addEventListener('click', openGithubDialog);
-  $('ghCancel').addEventListener('click', () => $('ghDlg').close());
-  $('ghForm').addEventListener('submit', publishToGithub);
-  $('ghOpen').addEventListener('click', () => {
-    if (state.cur && state.cur.github) api.openExternal(state.cur.github.url);
-  });
-
   $('settingsBtn').addEventListener('click', openSettings);
+  $('updateCheck').addEventListener('click', () => updateAction(api.checkUpdates));
+  $('updateDownload').addEventListener('click', () => updateAction(api.downloadUpdate));
+  $('updateInstall').addEventListener('click', () => {
+    if (isLive() || state.transitioning) return toast('End the current meeting before updating the app.', true);
+    if (confirm('Restart MeetNotes to install the downloaded update? Your saved meetings and settings will be kept.')) updateAction(api.installUpdate);
+  });
+  $('updateReleases').addEventListener('click', () => api.openReleases());
+  api.onUpdateStatus(renderUpdateState);
   $('sCancel').addEventListener('click', () => $('settingsDlg').close());
   $('settingsForm').addEventListener('submit', async () => { await saveSettings(); toast('Settings saved'); });
   $('sMiniOpacity').addEventListener('input', (e) => { $('sMiniOpacityVal').textContent = e.target.value + '%'; });
@@ -575,16 +551,6 @@
       $('keyState').textContent = 'An API key is saved on this computer.';
       toast('The API key works.');
     } catch (e) { toast('Key test failed: ' + errText(e), true, 8000); }
-  });
-  $('sGhTest').addEventListener('click', async () => {
-    try {
-      await saveSettings();
-      $('sGhToken').value = '';
-      toast('Testing the GitHub token...', false, 0);
-      const r = await api.testGithub();
-      $('ghTokenState').textContent = 'A GitHub token is saved on this computer.';
-      toast(`The GitHub token works for ${r.login}.`);
-    } catch (e) { toast('GitHub test failed: ' + errText(e), true, 9000); }
   });
   $('sWipe').addEventListener('click', async () => {
     if (isLive() || state.transitioning) return toast('End the current meeting first.', true);

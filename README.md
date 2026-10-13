@@ -1,4 +1,4 @@
-# MeetNotes v1.1.0
+# MeetNotes v1.2.0
 
 Personal Windows desktop app that tracks a meeting, transcribes it locally, keeps your notes, and generates a summary, action items and an after-meeting agenda with Claude.
 
@@ -26,7 +26,7 @@ Personal Windows desktop app that tracks a meeting, transcribes it locally, keep
 
 Anything the meeting did not state is marked "Data to be confirmed" instead of guessed. Regenerate with an optional instruction, for example "focus on budget and schedule items".
 
-## New in 1.1.0
+## Features
 
 ### Floating recording widget
 - While a meeting is live, a small player-style widget sits in a screen corner: pulsing REC dot, timer, level meter, pause/resume, stop, open-app.
@@ -38,18 +38,24 @@ Anything the meeting did not state is marked "Data to be confirmed" instead of g
 - Pause/resume stops capturing without ending the meeting; the timer freezes.
 - Settings > Floating widget: appearance, opacity, size, corner, auto-show, and a Preview button.
 
-### Publish to GitHub
-- Summary and agenda tab > **Publish to GitHub** saves `meetings/YYYY-MM-DD-title/summary.md` (and optionally `transcript.txt`) into a repository.
-- Republishing the same meeting updates its files instead of duplicating them.
-- Default is a **private** repository. The app refuses to write to a public repository unless you chose Public and confirm the warning. The transcript is off by default.
-- Token setup: Settings > GitHub. Simplest safe route: create an empty private repo on github.com, then a fine-grained token limited to that repo with Contents set to read and write. Letting the app create repos needs extra permission; the exact permission name is data to be confirmed, so a classic token with the `repo` scope is the fallback. The token is stored encrypted and never shown again.
+### App updates from GitHub
+- GitHub is used only to distribute app updates from [levanis-design/MeetNotes](https://github.com/levanis-design/MeetNotes).
+- In the installed Windows app, open **Settings > App updates > Check for updates**.
+- If a newer version exists, choose **Download update**, then **Restart and install**. Installation happens only after you confirm the restart; closing the app does not install an update automatically.
+- End your meeting before checking, downloading or installing an update.
+- No GitHub account or personal access token is needed. The app never uploads summaries, meetings, notes or transcripts to GitHub.
+- Local Markdown, PDF and transcript exports remain available.
+- The old 1.1.0 installer has no updater. Install 1.2.0 once from [GitHub Releases](https://github.com/levanis-design/MeetNotes/releases); future releases can be installed through the app.
+- When running from source with `npm start`, use **View releases** or update the source with Git. In-app installation is for packaged Windows builds.
+- On upgrade, the app removes its saved GitHub publishing token and repository preferences. Your meetings and Anthropic key are kept. Content published with an older version remains in the destination repository until you delete it there.
 
 ## Privacy
 
 - Audio is never saved. Only recognized text is stored, in `%APPDATA%\meetnotes`.
 - Speech recognition runs on your computer.
-- Generating a summary sends that meeting's transcript, notes and agenda text to the Anthropic API. Nothing is sent until you press Generate.
+- Generating a summary sends that meeting's transcript, notes and agenda text to the Anthropic API. Meeting content is sent to Claude only when you press Generate.
 - Your API key is encrypted with Windows secure storage.
+- Update checks and installer downloads contact GitHub without including meeting content.
 - Settings has a button to delete all meetings.
 - Tell participants you are recording notes. Some states require everyone's consent to record.
 
@@ -62,7 +68,7 @@ Anything the meeting did not state is marked "Data to be confirmed" instead of g
 
 ## Validation and preview status
 
-Windows packaging, Electron UI/IPC, PDF/Markdown/text exports, floating-widget creation and always-on-top, and recording lifecycle with simulated audio have been tested. Real Whisper model loading and CPU inference pass, including from the packaged app, using synthetic silence. Live microphone/loopback capture, real-speech accuracy, Claude API summaries, GitHub publishing from the app, transparency, dragging and DPI scaling still require live checks. This release is a preview. See [REVIEW.md](REVIEW.md) and [RELEASE_NOTES.md](RELEASE_NOTES.md).
+Windows packaging, Electron UI/IPC, PDF/Markdown/text exports, floating-widget creation and always-on-top, and recording lifecycle with simulated audio have been tested. Real Whisper model loading and CPU inference pass, including from the packaged app, using synthetic silence. Live microphone/loopback capture, real-speech accuracy, Claude API summaries, a complete installed-app upgrade, transparency, dragging and DPI scaling still require live checks. This release is a preview. See [REVIEW.md](REVIEW.md) and [RELEASE_NOTES.md](RELEASE_NOTES.md).
 
 ## Development
 
@@ -73,3 +79,15 @@ Windows packaging, Electron UI/IPC, PDF/Markdown/text exports, floating-widget c
 - `npx electron tests/packaged-transcription.cjs` checks packaged speech-worker inference after a build.
 - `npm run dist -- --publish never` builds the verified Windows installer without automatic publishing.
 - Code layout: `src/` main process, `renderer/` interface and audio capture.
+
+## Publishing app updates
+
+The Windows NSIS installer uses `electron-updater` with the public GitHub Releases feed. A release must contain the installer, its `.blockmap` file and `latest.yml`; the metadata names the installer and its SHA-512 checksum. See the [electron-builder update documentation](https://www.electron.build/v26/docs/features/auto-update/).
+
+1. Bump `version` in `package.json` and refresh the lockfile with `npm install --package-lock-only`.
+2. Update `RELEASE_NOTES.md`, run the tests and desktop smoke checks, and commit the changes.
+3. Push the commit and a matching tag, for example `v1.2.1` for version `1.2.1`.
+4. The **Publish Windows release** GitHub Actions workflow tests and builds the app, then publishes the installer and update metadata using the repository's Actions token. Users do not need that token.
+5. Verify the release contains all three assets and test checking/downloading from an older installed version before announcing it.
+
+Only published releases are used for updates; drafts and prereleases are skipped. The app does not downgrade. Existing local meetings and settings remain in the same user-data directory. The installer is currently unsigned; Windows code signing remains a recommended follow-up before wider distribution.

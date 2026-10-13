@@ -24,6 +24,21 @@ app.whenReady().then(async () => {
     while (win.webContents.isLoading()) await delay(100);
     const run = (code) => win.webContents.executeJavaScript(code);
     assert.equal(await run('typeof window.api.createMeeting'), 'function');
+    assert.equal(await run('typeof window.api.publishGithub'), 'undefined');
+    assert.equal(await run('typeof window.api.testGithub'), 'undefined');
+    assert.equal(await run("document.getElementById('ghBtn')"), null);
+    assert.equal(await run("document.getElementById('sGhToken')"), null);
+    await run("document.getElementById('settingsBtn').click()");
+    await delay(200);
+    assert.ok(await run("document.getElementById('updateStatus').textContent.includes('installed Windows app')"));
+    assert.equal(await run("document.getElementById('updateCheck').disabled"), true);
+    win.webContents.send('updates:status', { status: 'available', currentVersion: '1.2.0', version: '1.3.0', percent: 0 });
+    await delay(100);
+    assert.equal(await run("document.getElementById('updateDownload').hidden"), false);
+    win.webContents.send('updates:status', { status: 'downloaded', currentVersion: '1.2.0', version: '1.3.0', percent: 100 });
+    await delay(100);
+    assert.equal(await run("document.getElementById('updateInstall').hidden"), false);
+    await run("document.getElementById('sCancel').click()");
     const result = await run(`(async () => {
       const a = await api.createMeeting({ title: 'Smoke A', agendaPre: 'Budget' });
       const b = await api.createMeeting({ title: 'Smoke B' });
@@ -63,6 +78,7 @@ app.whenReady().then(async () => {
     await run(`window.startCapture = async () => ({ setPaused() {}, async stop() {} }); document.getElementById('startBtn').click(); document.getElementById('newBtn').click();`);
     await delay(500);
     assert.equal(await run("document.getElementById('mStatus').textContent"), 'Live');
+    assert.equal(await run("document.getElementById('updateInstall').disabled"), true);
     assert.equal(await run("document.getElementById('newDlg').open"), false);
     await run("document.getElementById('pauseBtn').click()");
     assert.equal(await run("document.getElementById('mStatus').textContent"), 'Paused');
@@ -70,7 +86,7 @@ app.whenReady().then(async () => {
     await delay(500);
     assert.equal(await run("document.getElementById('mStatus').textContent"), 'Ended');
     assert.deepEqual(errors, [], 'no renderer errors');
-    console.log('PASS: Electron preload, meeting creation/editing/notes, exports including PDF, widget, and recording lifecycle (fake capture).');
+    console.log('PASS: Electron preload, removed publishing UI/API, app-update settings, meeting edits/notes, PDF exports, widget, and recording lifecycle (fake capture).');
     clearTimeout(deadline);
     app.exit(0);
   } catch (error) {

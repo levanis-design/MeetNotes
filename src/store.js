@@ -5,7 +5,7 @@ const path = require('path');
 const { isCorner, isSize } = require('./mini-layout');
 
 const ID_PATTERN = /^m_\d+$/;
-const UPDATABLE = ['title', 'attendees', 'agendaPre', 'status', 'startedAt', 'endedAt', 'elapsedSec', 'notes', 'github'];
+const UPDATABLE = ['title', 'attendees', 'agendaPre', 'status', 'startedAt', 'endedAt', 'elapsedSec', 'notes'];
 
 function writeAtomic(file, data) {
   const tmp = file + '.tmp';
@@ -22,9 +22,6 @@ function createStore(baseDir, cipher) {
     model: 'claude-sonnet-5-5',
     whisperModel: 'Xenova/whisper-base.en',
     apiKeyEnc: null,
-    githubTokenEnc: null,
-    githubRepo: 'meeting-notes',
-    githubPrivate: true,
     miniAppearance: 'solid', // 'solid' or 'transparent'
     miniOpacity: 55,         // idle opacity in percent, used when transparent
     miniCorner: 'top-right',
@@ -41,15 +38,20 @@ function createStore(baseDir, cipher) {
     }
   }
 
+  // Remove obsolete publishing credentials on upgrade, keeping meetings and Claude settings.
+  const initialSettings = readSettings();
+  let removedLegacy = false;
+  for (const key of ['githubTokenEnc', 'githubRepo', 'githubPrivate']) {
+    if (key in initialSettings) { delete initialSettings[key]; removedLegacy = true; }
+  }
+  if (removedLegacy) writeAtomic(settingsFile, JSON.stringify(initialSettings, null, 2));
+
   function getSettings() {
     const s = readSettings();
     return {
       model: s.model,
       whisperModel: s.whisperModel,
       hasKey: Boolean(s.apiKeyEnc),
-      hasGithubToken: Boolean(s.githubTokenEnc),
-      githubRepo: s.githubRepo,
-      githubPrivate: s.githubPrivate,
       miniAppearance: s.miniAppearance,
       miniOpacity: s.miniOpacity,
       miniCorner: s.miniCorner,
@@ -66,11 +68,6 @@ function createStore(baseDir, cipher) {
     if (typeof patch.apiKey === 'string') {
       s.apiKeyEnc = patch.apiKey.trim() ? cipher.encrypt(patch.apiKey.trim()) : null;
     }
-    if (typeof patch.githubToken === 'string') {
-      s.githubTokenEnc = patch.githubToken.trim() ? cipher.encrypt(patch.githubToken.trim()) : null;
-    }
-    if (typeof patch.githubRepo === 'string' && patch.githubRepo.trim()) s.githubRepo = patch.githubRepo.trim().slice(0, 200);
-    if (typeof patch.githubPrivate === 'boolean') s.githubPrivate = patch.githubPrivate;
     if (patch.miniAppearance === 'solid' || patch.miniAppearance === 'transparent') s.miniAppearance = patch.miniAppearance;
     if (typeof patch.miniOpacity === 'number' && isFinite(patch.miniOpacity)) {
       s.miniOpacity = Math.min(100, Math.max(20, Math.round(patch.miniOpacity)));
@@ -86,11 +83,6 @@ function createStore(baseDir, cipher) {
   function getApiKey() {
     const s = readSettings();
     return s.apiKeyEnc ? cipher.decrypt(s.apiKeyEnc) : null;
-  }
-
-  function getGithubToken() {
-    const s = readSettings();
-    return s.githubTokenEnc ? cipher.decrypt(s.githubTokenEnc) : null;
   }
 
   function fileFor(id) {
@@ -124,7 +116,6 @@ function createStore(baseDir, cipher) {
       notes: [],
       summary: null,
       generatedAt: null,
-      github: null,
     };
     return write(meeting);
   }
@@ -143,7 +134,6 @@ function createStore(baseDir, cipher) {
           startedAt: m.startedAt,
           endedAt: m.endedAt,
           hasSummary: Boolean(m.summary),
-          published: Boolean(m.github),
         });
       } catch {
         // skip unreadable file
@@ -194,7 +184,7 @@ function createStore(baseDir, cipher) {
   }
 
   return {
-    getSettings, setSettings, getApiKey, getGithubToken,
+    getSettings, setSettings, getApiKey,
     create, list, get, update, appendTranscript, addNote, setSummary, remove, wipeAll,
   };
 }

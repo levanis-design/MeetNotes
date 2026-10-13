@@ -27,9 +27,12 @@ contextBridge.exposeInMainWorld('api', {
   exportPdf: (id) => invoke('export:pdf', id),
   exportTranscript: (id) => invoke('export:transcript', id),
 
-  testGithub: () => invoke('github:test'),
-  publishGithub: (payload) => invoke('github:publish', payload),
-  openExternal: (url) => invoke('shell:open', url),
+  getUpdateState: () => invoke('updates:get'),
+  checkUpdates: () => invoke('updates:check'),
+  downloadUpdate: () => invoke('updates:download'),
+  installUpdate: () => invoke('updates:install'),
+  openReleases: () => invoke('updates:openReleases'),
+  onUpdateStatus: (cb) => ipcRenderer.on('updates:status', (e, state) => cb(state)),
 
   // Floating widget and window options
   miniUpdate: (state) => ipcRenderer.send('mini:update', state),

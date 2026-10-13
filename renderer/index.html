@@ -81,11 +81,6 @@
             <button id="mdBtn" class="exp" disabled>Export Markdown</button>
             <button id="pdfBtn" class="exp" disabled>Export PDF</button>
             <button id="txBtn" class="exp">Export transcript</button>
-            <button id="ghBtn" class="exp" disabled>Publish to GitHub</button>
-          </div>
-          <div id="ghInfo" class="gh-info" hidden>
-            <span id="ghText"></span>
-            <button id="ghOpen" class="link" type="button">Open on GitHub</button>
           </div>
           <div id="summary" class="summary"><p class="muted">Nothing generated yet.</p></div>
         </div>
@@ -107,25 +102,6 @@
       <div class="dlg-actions">
         <button type="button" id="nCancel">Cancel</button>
         <button type="submit" class="primary">Create</button>
-      </div>
-    </form>
-  </dialog>
-
-  <dialog id="ghDlg">
-    <form method="dialog" id="ghForm">
-      <h2>Publish to GitHub</h2>
-      <p class="muted">Saves this meeting's summary as a Markdown file in its own folder under <code>meetings/</code> in the repository. If the repository does not exist, it is created.</p>
-      <label class="label" for="ghRepo">Repository</label>
-      <input id="ghRepo" required placeholder="meeting-notes or owner/meeting-notes">
-      <div class="label">Repository visibility</div>
-      <label class="check"><input type="radio" name="ghVis" value="private" checked> Private (recommended). Stop if the repository turns out to be public</label>
-      <label class="check"><input type="radio" name="ghVis" value="public"> Public. Anyone on the internet can read it</label>
-      <div class="label">Contents</div>
-      <label class="check"><input type="checkbox" id="ghTranscript"> Also upload the full transcript</label>
-      <p id="ghNote" class="muted"></p>
-      <div class="dlg-actions">
-        <button type="button" id="ghCancel">Cancel</button>
-        <button type="submit" id="ghGo" class="primary">Publish</button>
       </div>
     </form>
   </dialog>
@@ -173,24 +149,20 @@
       <label class="check"><input type="checkbox" id="sAutoMini"> Show the widget automatically when a meeting starts</label>
       <div class="dlg-actions left"><button type="button" id="sPreview">Preview widget</button></div>
 
-      <h3>GitHub</h3>
-      <label class="label" for="sGhToken">Personal access token</label>
-      <input id="sGhToken" type="password" autocomplete="off" placeholder="Leave blank to keep the saved token">
-      <p id="ghTokenState" class="muted"></p>
-      <label class="label" for="sGhRepo">Default repository</label>
-      <input id="sGhRepo" placeholder="meeting-notes">
-      <label class="label" for="sGhPrivate">Default visibility</label>
-      <select id="sGhPrivate">
-        <option value="private">Private (recommended)</option>
-        <option value="public">Public</option>
-      </select>
-      <p class="muted">The token is stored encrypted on this computer. The simplest safe setup is to create an empty private repository on github.com and use a fine-grained token limited to that repository with Contents set to read and write. Letting the app create repositories needs extra permission; the exact permission name is data to be confirmed, so a classic token with the repo scope is the fallback.</p>
+      <h3>App updates</h3>
+      <p class="muted">Updates come from levanis-design/MeetNotes on GitHub. No GitHub account or token is needed. Meeting content is never uploaded to GitHub.</p>
+      <p id="updateStatus" class="muted" role="status" aria-live="polite"></p>
+      <div class="dlg-actions left">
+        <button type="button" id="updateCheck">Check for updates</button>
+        <button type="button" id="updateDownload" hidden>Download update</button>
+        <button type="button" id="updateInstall" hidden>Restart and install</button>
+        <button type="button" id="updateReleases">View releases</button>
+      </div>
 
       <div class="dlg-actions spread">
         <button type="button" id="sWipe" class="danger">Delete all meetings</button>
         <span>
           <button type="button" id="sTest">Test key</button>
-          <button type="button" id="sGhTest">Test GitHub</button>
           <button type="button" id="sCancel">Close</button>
           <button type="submit" class="primary">Save</button>
         </span>

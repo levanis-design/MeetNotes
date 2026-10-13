@@ -6,13 +6,14 @@ const { createStore } = require('./store');
 const { Transcriber, toFloat32 } = require('./transcriber');
 const ai = require('./ai');
 const render = require('./render');
-const github = require('./github');
+const { createUpdates } = require('./updates');
 const layout = require('./mini-layout');
 
 let win = null;
 let mini = null;
 let store = null;
 let transcriber = null;
+let updates = null;
 
 let live = false;            // a meeting is being recorded
 let miniState = null;        // last state sent by the main window
@@ -334,7 +335,7 @@ function registerIpc() {
       defaultId: 0,
       cancelId: 0,
       message: 'Delete all meetings, transcripts and notes?',
-      detail: 'This cannot be undone. Your settings, API key and GitHub token are kept. Anything already published to GitHub stays there.',
+      detail: 'This cannot be undone. Your settings and API key are kept.',
     });
     if (r.response !== 1) return false;
     store.wipeAll();
@@ -368,55 +369,6 @@ function registerIpc() {
     return store.setSummary(id, summary);
   });
 
-  // GitHub
-  ipcMain.handle('github:test', async () => {
-    const token = store.getGithubToken();
-    if (!token) throw new Error('No GitHub token saved.');
-    const user = await github.createClient({ token }).getUser();
-    return { login: user.login };
-  });
-  ipcMain.handle('github:publish', async (e, { id, repoName, isPrivate, includeTranscript }) => {
-    const token = store.getGithubToken();
-    if (!token) throw new Error('Add a GitHub token in Settings first.');
-    const meeting = store.get(id);
-    if (!meeting.summary) throw new Error('Generate the summary before publishing.');
-    if (!isPrivate) {
-      const r = await dialog.showMessageBox(win, {
-        type: 'warning',
-        buttons: ['Cancel', 'Publish publicly'],
-        defaultId: 0,
-        cancelId: 0,
-        message: 'Publish this meeting to a public repository?',
-        detail: 'Anyone on the internet will be able to read it. Meeting content can include confidential information.',
-      });
-      if (r.response !== 1) return null;
-    }
-    const result = await github.publishMeeting({
-      client: github.createClient({ token }),
-      repoInput: repoName,
-      isPrivate: Boolean(isPrivate),
-      allowPublic: !isPrivate,
-      meeting,
-      renderMarkdown: (m) => render.renderMarkdown(m),
-      renderTranscript: (m) => render.renderTranscriptText(m),
-      includeTranscript: Boolean(includeTranscript),
-    });
-    const record = {
-      repo: result.repo,
-      folder: result.folder,
-      url: result.url,
-      publishedAt: new Date().toISOString(),
-      transcript: Boolean(includeTranscript),
-    };
-    store.update(id, { github: record });
-    store.setSettings({ githubRepo: repoName });
-    return record;
-  });
-  ipcMain.handle('shell:open', (e, url) => {
-    if (typeof url === 'string' && url.startsWith('https://github.com/')) return shell.openExternal(url);
-    return false;
-  });
-
   // Rendering and export
   ipcMain.handle('render:html', (e, id) => render.renderHtml(store.get(id)));
   ipcMain.handle('render:markdown', (e, id) => render.renderMarkdown(store.get(id)));
@@ -445,11 +397,23 @@ function registerIpc() {
     });
   });
 
+  ipcMain.handle('updates:get', () => updates.getState());
+  ipcMain.handle('updates:check', () => updates.check());
+  ipcMain.handle('updates:download', () => updates.download());
+  ipcMain.handle('updates:install', () => updates.install());
+  ipcMain.handle('updates:openReleases', () => shell.openExternal('https://github.com/levanis-design/MeetNotes/releases'));
+
   registerMiniIpc();
 }
 
 app.whenReady().then(() => {
   store = createStore(app.getPath('userData'), cipher);
+  updates = createUpdates({
+    updater: app.isPackaged ? require('electron-updater').autoUpdater : null,
+    version: app.getVersion(),
+    isBusy: () => live,
+    onChange: (state) => { if (win && !win.isDestroyed()) win.webContents.send('updates:status', state); },
+  });
   setupMediaAccess();
   registerIpc();
   createWindow();

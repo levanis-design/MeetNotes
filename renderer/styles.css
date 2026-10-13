@@ -86,7 +86,6 @@ input[type="range"] { padding: 0; border: none; background: transparent; }
 .check input { margin-top: 4px; flex: none; }
 button.pin.on, #pinBtn.on { border-color: var(--accent); color: var(--accent); }
 #pauseBtn.resume { border-color: var(--live); color: var(--live); }
-.gh-info { display: flex; align-items: center; gap: 10px; margin: -4px 0 12px; color: var(--muted); font-size: 13px; }
 button.link { border: none; background: none; padding: 0; color: var(--accent); text-decoration: underline; }
 dialog { max-height: 90vh; overflow: auto; }
 dialog h3 { font-size: 13px; margin: 20px 0 2px; padding-top: 14px; border-top: 1px solid var(--border); }
