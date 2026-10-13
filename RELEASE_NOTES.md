@@ -16,4 +16,4 @@ Install `MeetNotes-Setup-1.2.0.exe` once to switch from 1.1.0, which has no upda
 
 ## Validation and remaining checks
 
-The automated suite covers storage, exports, audio cleanup and the update lifecycle, recording guards, duplicate operations, failure recovery and credential migration. Desktop and package smoke checks cover the interface and local transcription. A complete restart/install upgrade on an installed Windows app still needs verification. Live meeting audio and Claude calls also require your real-session check. The installer remains unsigned.
+The automated suite covers storage, exports, audio cleanup and the update lifecycle, recording guards, duplicate operations, failure recovery and credential migration. Desktop and package smoke checks cover the interface and local transcription. The real public GitHub update feed, installer download and checksum verification pass. A complete restart/install upgrade on an installed Windows app still needs verification. Live meeting audio and Claude calls also require your real-session check. The installer remains unsigned.

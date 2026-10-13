@@ -68,7 +68,7 @@ Anything the meeting did not state is marked "Data to be confirmed" instead of g
 
 ## Validation and preview status
 
-Windows packaging, Electron UI/IPC, PDF/Markdown/text exports, floating-widget creation and always-on-top, and recording lifecycle with simulated audio have been tested. Real Whisper model loading and CPU inference pass, including from the packaged app, using synthetic silence. Live microphone/loopback capture, real-speech accuracy, Claude API summaries, a complete installed-app upgrade, transparency, dragging and DPI scaling still require live checks. This release is a preview. See [REVIEW.md](REVIEW.md) and [RELEASE_NOTES.md](RELEASE_NOTES.md).
+The real GitHub update feed, installer download and checksum verification pass. Windows packaging, Electron UI/IPC, PDF/Markdown/text exports, floating-widget creation and always-on-top, and recording lifecycle with simulated audio have been tested. Real Whisper model loading and CPU inference pass, including from the packaged app, using synthetic silence. Live microphone/loopback capture, real-speech accuracy, Claude API summaries, a complete installed-app upgrade, transparency, dragging and DPI scaling still require live checks. See [REVIEW.md](REVIEW.md) and [RELEASE_NOTES.md](RELEASE_NOTES.md).
 
 ## Development
 
@@ -77,6 +77,7 @@ Windows packaging, Electron UI/IPC, PDF/Markdown/text exports, floating-widget c
 - `npx electron tests/electron-smoke.cjs` runs isolated desktop integration checks. Add `--packaged` after building to test the packaged source.
 - `node tests/transcription-smoke.cjs` downloads the model into isolated test data and runs real CPU inference on silence.
 - `npx electron tests/packaged-transcription.cjs` checks packaged speech-worker inference after a build.
+- `npx electron tests/update-feed-smoke.cjs` checks the published 1.2.0 feed and downloads/checksums the installer into isolated test data without installing it.
 - `npm run dist -- --publish never` builds the verified Windows installer without automatic publishing.
 - Code layout: `src/` main process, `renderer/` interface and audio capture.
 

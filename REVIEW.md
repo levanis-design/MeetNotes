@@ -8,6 +8,8 @@ The real Electron app was tested with isolated test data: meeting creation, fiel
 
 Real Whisper model loading and CPU inference were tested with synthetic silence, including the worker loaded from the Windows package. This establishes that model files and native dependencies can load; it does not establish speech-recognition accuracy.
 
+The real public GitHub update feed was tested with the Electron updater: version detection, installer download and checksum validation pass. The test does not install the downloaded update.
+
 ## Remaining live checks
 
 - Record a short call with microphone and Windows loopback audio; confirm both sources, pause/resume, minimization, and the final transcript.
@@ -21,7 +23,7 @@ Real Whisper model loading and CPU inference were tested with synthetic silence,
 1. Add editable transcripts and a search across notes/transcripts, so recognition errors can be corrected before summaries.
 2. Add a full local backup/restore flow for meeting data; individual document exports are not a complete backup.
 3. Display queue delay and enforce a bounded transcription backlog, so slower CPUs cannot fall indefinitely behind live audio.
-4. Add a custom app icon, Windows code signing  before wider distribution.
+4. Add a custom app icon, Windows code signing before wider distribution.
 5. Add integration coverage for actual microphone/loopback streams and configurable API failures.
 
 GitHub publishing of meeting content has been removed. Existing GitHub publishing credentials are cleared on upgrade. App updates read release metadata and download installers without uploading meeting data.
