@@ -218,6 +218,10 @@
                 <button id="pdfBtn" class="exp" disabled>Export PDF</button>
                 <button id="txBtn" class="exp">Export transcript</button>
               </div>
+              <div class="export-bar">
+                <button id="promptBtn" class="exp" title="Copies the meeting and instructions, to paste into Copilot, ChatGPT, Claude.ai or any AI tool">Copy prompt for any AI</button>
+                <button id="pasteBtn" class="exp" title="Reads the AI reply you copied and turns it into the summary and agenda">Paste AI reply</button>
+              </div>
               <div id="summary" class="summary"><p class="muted">Nothing generated yet.</p></div>
             </div>
           </section>
@@ -289,38 +293,76 @@
       <label class="check"><input type="checkbox" id="sAutoTasks"> Add a meeting's action items to Tasks when a summary is generated</label>
 
       <h3 id="olSection">Outlook calendar</h3>
-      <p id="olState" class="muted"></p>
-      <label class="label" for="sOlClient">Application (client) ID</label>
-      <input id="sOlClient" autocomplete="off" placeholder="00000000-0000-0000-0000-000000000000">
-      <label class="label" for="sOlTenant">Directory (tenant)</label>
-      <input id="sOlTenant" autocomplete="off" placeholder="common, a tenant ID, or your domain such as company.com">
+      <p id="calState" class="muted"></p>
+      <p class="muted">Easiest option: MeetNotes reads your calendar from Outlook on this computer. No sign-in, no setup and no administrator approval. Works with classic Outlook for Windows. MeetNotes can only read the calendar.</p>
       <div class="dlg-actions left">
-        <button type="button" id="olConnect" class="primary">Connect Outlook</button>
-        <button type="button" id="olDisconnect">Disconnect</button>
+        <button type="button" id="odConnect" class="primary">Use Outlook on this computer</button>
+        <button type="button" id="odDisconnect">Stop using Outlook on this computer</button>
       </div>
       <details class="help">
-        <summary>How to get the Application ID (about five minutes, once)</summary>
-        <ol>
-          <li>Open entra.microsoft.com and go to App registrations, then New registration. Name it MeetNotes.</li>
-          <li>For a work account, choose "Accounts in this organizational directory only". For a personal Outlook.com account, choose the option that includes personal Microsoft accounts. Leave the redirect address empty.</li>
-          <li>Open Authentication and set "Allow public client flows" to Yes. Save.</li>
-          <li>Open API permissions, Add a permission, Microsoft Graph, Delegated, and add Calendars.Read and User.Read. MeetNotes never asks to change your calendar.</li>
-          <li>Copy the Application (client) ID and the Directory (tenant) ID from the Overview page into the two boxes above. Menu names can differ a little between Microsoft portal versions, and some organisations require an administrator to approve the permission.</li>
-        </ol>
+        <summary>Other options: Microsoft account sign-in or a published calendar link</summary>
+        <p class="muted">Use these if you use the new Outlook, Outlook on the web only, or another computer.</p>
+        <p id="olState" class="muted"></p>
+        <label class="label" for="sOlClient">Application (client) ID</label>
+        <input id="sOlClient" autocomplete="off" placeholder="00000000-0000-0000-0000-000000000000">
+        <label class="label" for="sOlTenant">Directory (tenant)</label>
+        <input id="sOlTenant" autocomplete="off" placeholder="common, a tenant ID, or your domain such as company.com">
+        <div class="dlg-actions left">
+          <button type="button" id="olConnect" class="primary">Connect Outlook</button>
+          <button type="button" id="olDisconnect">Disconnect</button>
+        </div>
+        <details class="help">
+          <summary>How to get the Application ID (about five minutes, once)</summary>
+          <ol>
+            <li>Open entra.microsoft.com and go to App registrations, then New registration. Name it MeetNotes.</li>
+            <li>For a work account, choose "Accounts in this organizational directory only". For a personal Outlook.com account, choose the option that includes personal Microsoft accounts. Leave the redirect address empty.</li>
+            <li>Open Authentication and set "Allow public client flows" to Yes. Save.</li>
+            <li>Open API permissions, Add a permission, Microsoft Graph, Delegated, and add Calendars.Read and User.Read. MeetNotes never asks to change your calendar.</li>
+            <li>Copy the Application (client) ID and the Directory (tenant) ID from the Overview page into the two boxes above. Menu names can differ a little between Microsoft portal versions, and some organisations require an administrator to approve the permission.</li>
+          </ol>
+        </details>
+
+        <label class="label" for="sIcs">Or use a published calendar link instead</label>
+        <input id="sIcs" type="password" autocomplete="off" placeholder="Leave blank to keep the saved link">
+        <p id="icsState" class="muted"></p>
+        <div class="dlg-actions left"><button type="button" id="icsTest">Test calendar link</button></div>
+        <p class="muted">In Outlook on the web: Settings, Calendar, Shared calendars, Publish a calendar, then copy the ICS link. The link works like a password for your calendar, so MeetNotes stores it encrypted. Your organisation may not allow publishing.</p>
+
       </details>
 
-      <label class="label" for="sIcs">Or use a published calendar link instead</label>
-      <input id="sIcs" type="password" autocomplete="off" placeholder="Leave blank to keep the saved link">
-      <p id="icsState" class="muted"></p>
-      <div class="dlg-actions left"><button type="button" id="icsTest">Test calendar link</button></div>
-      <p class="muted">In Outlook on the web: Settings, Calendar, Shared calendars, Publish a calendar, then copy the ICS link. The link works like a password for your calendar, so MeetNotes stores it encrypted. Your organisation may not allow publishing.</p>
+      <h3>AI summary</h3>
+      <label class="label" for="sAiProvider">AI connection</label>
+      <select id="sAiProvider">
+        <option value="anthropic">Claude with an Anthropic API key</option>
+        <option value="claude-cli">Claude Code on this computer (your Claude subscription, no key)</option>
+        <option value="codex-cli">Codex CLI on this computer (your ChatGPT sign-in, no key)</option>
+        <option value="openai">OpenAI, Azure OpenAI or another compatible service</option>
+      </select>
+      <div id="aiAnthropic">
+        <label class="label" for="sKey">Anthropic API key</label>
+        <input id="sKey" type="password" autocomplete="off" placeholder="Leave blank to keep the saved key">
+        <p id="keyState" class="muted"></p>
+        <label class="label" for="sModel">Claude model</label>
+        <input id="sModel">
+      </div>
+      <div id="aiOpenai" hidden>
+        <label class="label" for="sOaKey">API key</label>
+        <input id="sOaKey" type="password" autocomplete="off" placeholder="Leave blank to keep the saved key">
+        <p id="oaKeyState" class="muted"></p>
+        <label class="label" for="sOaBase">API address</label>
+        <input id="sOaBase" autocomplete="off" placeholder="https://api.openai.com/v1">
+        <label class="label" for="sOaModel">Model</label>
+        <input id="sOaModel" autocomplete="off" placeholder="gpt-5">
+        <p class="muted">OpenAI: keep the default address. Azure OpenAI: use https://YOUR-RESOURCE.openai.azure.com/openai/v1 and your deployment name as the model. Local models: Ollama is http://localhost:11434/v1 and LM Studio is http://localhost:1234/v1, no key needed.</p>
+      </div>
+      <div id="aiCli" hidden>
+        <label class="label" for="sCliPath">Command path (optional)</label>
+        <input id="sCliPath" autocomplete="off" placeholder="Leave blank to use claude or codex from the PATH">
+        <p class="muted">Install once in PowerShell: <code>npm install -g @anthropic-ai/claude-code</code> for Claude Code, or <code>npm install -g @openai/codex</code> for Codex. Then run <code>claude</code> or <code>codex</code> once and sign in. MeetNotes sends the meeting text to it and reads the reply.</p>
+      </div>
+      <p class="muted">Using Microsoft Copilot, ChatGPT, Claude.ai or another tool without a connection? On the Summary tab, choose "Copy prompt for any AI", paste it into the tool, copy the whole reply, then choose "Paste AI reply".</p>
 
-      <h3>Claude and speech</h3>
-      <label class="label" for="sKey">Anthropic API key</label>
-      <input id="sKey" type="password" autocomplete="off" placeholder="Leave blank to keep the saved key">
-      <p id="keyState" class="muted"></p>
-      <label class="label" for="sModel">Claude model</label>
-      <input id="sModel">
+      <h3>Speech</h3>
       <label class="label" for="sWhisper">Speech model</label>
       <select id="sWhisper">
         <option value="Xenova/whisper-tiny.en">tiny.en (fastest, lowest accuracy)</option>
@@ -367,7 +409,7 @@
       <div class="dlg-actions spread">
         <button type="button" id="sWipe" class="danger">Delete all meetings</button>
         <span>
-          <button type="button" id="sTest">Test key</button>
+          <button type="button" id="sTest">Test AI connection</button>
           <button type="button" id="sCancel">Close</button>
           <button type="submit" class="primary">Save</button>
         </span>

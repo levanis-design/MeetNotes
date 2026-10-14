@@ -213,6 +213,10 @@
       chip.classList.add('ok');
       chip.textContent = c.account ? `Outlook · ${c.account}` : 'Outlook connected';
       chip.title = 'Outlook calendar (read-only)';
+    } else if (c.source === 'outlook-desktop') {
+      chip.classList.add('ok');
+      chip.textContent = 'Outlook on this computer';
+      chip.title = 'Calendar read from Outlook on this computer (read-only)';
     } else if (c.source === 'ics') {
       chip.classList.add('ok');
       chip.textContent = 'Calendar link';

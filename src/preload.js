@@ -21,6 +21,8 @@ contextBridge.exposeInMainWorld('api', {
   onModelStatus: (cb) => ipcRenderer.on('model:status', (e, msg) => cb(msg)),
 
   generate: (id, instruction) => invoke('ai:generate', { id, instruction }),
+  aiPrompt: (id, instruction) => invoke('ai:prompt', { id, instruction }),
+  aiImport: (id) => invoke('ai:import', { id }),
   renderHtml: (id) => invoke('render:html', id),
   renderMarkdown: (id) => invoke('render:markdown', id),
   exportMarkdown: (id) => invoke('export:markdown', id),
@@ -49,6 +51,8 @@ contextBridge.exposeInMainWorld('api', {
   outlookDisconnect: () => invoke('outlook:disconnect'),
   onOutlookCode: (cb) => ipcRenderer.on('outlook:code', (e, info) => cb(info)),
   testIcs: () => invoke('ics:test'),
+  outlookDesktopConnect: () => invoke('outlookDesktop:connect'),
+  outlookDesktopDisconnect: () => invoke('outlookDesktop:disconnect'),
 
   // Floating widget and window options
   miniUpdate: (state) => ipcRenderer.send('mini:update', state),

@@ -6,9 +6,12 @@ const path = require('path');
 const vm = require('vm');
 const { Transcriber } = require('../src/transcriber');
 function captureEnvironment({ failWorklet = false, failMic = false } = {}) {
-  const stats = { closed: 0, resumed: 0, stopped: 0 };
-  const track = { stop() { stats.stopped++; } };
-  const stream = { getTracks: () => [track] };
+  const stats = { closed: 0, resumed: 0, stopped: 0, micRequests: 0, tracks: [] };
+  const makeStream = () => {
+    const track = { stop() { stats.stopped++; }, onended: null };
+    stats.tracks.push(track);
+    return { getTracks: () => [track], getAudioTracks: () => [track] };
+  };
   const node = () => ({ connect() {}, disconnect() {}, gain: {}, port: {} });
   class AudioContext {
     constructor() {
@@ -23,10 +26,11 @@ function captureEnvironment({ failWorklet = false, failMic = false } = {}) {
   const context = { window: {}, AudioContext, AudioWorkletNode: function () { return node(); },
     Segmenter: class { flush() { return null; } },
     navigator: { mediaDevices: {
-      getUserMedia: async () => { if (failMic) throw new Error('mic denied'); return stream; },
+      getUserMedia: async () => { stats.micRequests++; if (failMic) throw new Error('mic denied'); return makeStream(); },
       getDisplayMedia: async () => { throw new Error('loopback unavailable'); },
     } },
   };
+  context.setTimeout = (fn) => setTimeout(fn, 0);
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../renderer/capture.js'), 'utf8'), context);
   return { stats, start: context.window.startCapture };
 }
@@ -47,6 +51,18 @@ test('capture: unavailable loopback warns, microphone stops and context closes',
   await capture.stop();
   assert.equal(stats.stopped, 1);
   assert.equal(stats.closed, 1);
+});
+test('capture: an unplugged microphone is reconnected to the current default device', async () => {
+  const { start, stats } = captureEnvironment();
+  const warnings = [];
+  const capture = await start({ getElapsed() { return 0; }, onSegment() {}, onWarning: message => warnings.push(message) });
+  assert.equal(stats.micRequests, 1);
+  stats.tracks[0].onended();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(stats.micRequests, 2, 'microphone requested again');
+  assert.match(warnings[warnings.length - 1], /Microphone changed/);
+  await capture.stop();
+  assert.equal(stats.stopped, 2, 'both microphone streams are released on stop');
 });
 test('transcriber: disposal rejects outstanding model readiness and transcription', async () => {
   const t = new Transcriber({ modelName: 'test', cacheDir: '' });

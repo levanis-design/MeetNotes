@@ -1,13 +1,30 @@
-# MeetNotes v1.3.0
+# MeetNotes v1.4.0
 
-Personal Windows desktop app that tracks a meeting, transcribes it locally, keeps your notes, and generates a summary, action items and an after-meeting agenda with Claude.
+Personal Windows desktop app that tracks a meeting, transcribes it locally, keeps your notes, and generates a summary, action items and an after-meeting agenda with Claude, Codex, OpenAI or any AI tool you paste into.
 
 ## Setup (Windows 10 or 11)
 
 1. Install Node.js 22 or newer from nodejs.org.
 2. Unzip this folder anywhere.
 3. Double-click `start.bat`. The first run installs dependencies, which takes a few minutes. Or run `npm install` then `npm start` in a terminal.
-4. Open Settings, paste your Anthropic API key, and press Test key.
+4. Open Settings, choose an AI connection under AI summary, and press Test AI connection. See "AI summary connections" below.
+5. Optional: in Settings, press "Use Outlook on this computer" to show your calendar.
+
+Or install it like any other app: download `MeetNotes Setup <version>.exe` from the GitHub Releases page, or build it yourself with `build-installer.bat`.
+
+### On a company network with SSL inspection
+
+If `npm install` fails with `UNABLE_TO_GET_ISSUER_CERT_LOCALLY` or "Exit handler never called", Node does not trust the company certificate. Export the Windows certificates once and point npm and Node at them, in PowerShell:
+
+```powershell
+$certs = Get-ChildItem Cert:\LocalMachine\Root, Cert:\CurrentUser\Root, Cert:\LocalMachine\CA
+$pem = foreach ($c in $certs) { "-----BEGIN CERTIFICATE-----"; [Convert]::ToBase64String($c.RawData, 'InsertLineBreaks'); "-----END CERTIFICATE-----" }
+$pem | Out-File C:\dev\windows-certs.pem -Encoding ascii
+npm config set cafile C:\dev\windows-certs.pem
+setx NODE_EXTRA_CA_CERTS "C:\dev\windows-certs.pem"
+```
+
+Open a new PowerShell window afterwards. Keep the project outside OneDrive, for example in `C:\dev\MeetNotes`, because OneDrive locks files during `npm install`. The app itself downloads the speech model and calls AI services through Electron's network stack, which already trusts the Windows certificate store.
 
 ## Using it
 
@@ -25,6 +42,28 @@ Personal Windows desktop app that tracks a meeting, transcribes it locally, keep
 5. Export as Markdown or PDF, copy the Markdown, or export the transcript as text.
 
 Anything the meeting did not state is marked "Data to be confirmed" instead of guessed. Regenerate with an optional instruction, for example "focus on budget and schedule items".
+
+## New in 1.4.0
+
+### AI summary connections
+Choose in Settings, under AI summary:
+
+| Connection | What you need |
+|---|---|
+| Claude with an Anthropic API key | An API key from console.anthropic.com |
+| Claude Code on this computer | `npm install -g @anthropic-ai/claude-code`, then run `claude` once and sign in. Uses your Claude subscription, no key |
+| Codex CLI on this computer | `npm install -g @openai/codex`, then run `codex` once and sign in. Uses your ChatGPT sign-in, no key |
+| OpenAI or compatible | An API key and model. Also works with Azure OpenAI, a company gateway, or local models in Ollama or LM Studio |
+
+For any other tool, such as Microsoft Copilot, ChatGPT or Claude.ai, use **Copy prompt for any AI** on the Summary tab, paste it into the tool, copy the whole reply, and press **Paste AI reply**. The summary, agenda and tasks are filled in the same way.
+
+### Outlook on this computer
+Settings, Outlook calendar, **Use Outlook on this computer**. MeetNotes reads the calendar from classic Outlook for Windows: no sign-in, app registration or administrator approval. Read-only. The new Outlook app has no automation interface, so use the Microsoft sign-in or a calendar link with it. Outlook may show a one-time security prompt; allow it.
+
+### Speech recognition
+- The model loads in the background at startup, so Start is immediate.
+- Better accuracy: full-precision encoder, 0.3 seconds of audio kept before speech, noise-adaptive speech detection, cuts at the quietest point, quiet-audio boost, and removal of repeated-phrase loops and filler hallucinations.
+- The microphone reconnects after a headset or Bluetooth change. Failed segments are retried. A warning appears when transcription falls behind.
 
 ## New in 1.3.0
 
@@ -82,7 +121,7 @@ The sign-in token and the calendar link are stored encrypted with Windows secure
 
 - Audio is never saved. Only recognized text is stored, in `%APPDATA%\meetnotes`.
 - Speech recognition runs on your computer.
-- Generating a summary sends that meeting's transcript, notes and agenda text to the Anthropic API. Meeting content is sent to Claude only when you press Generate. Calendar data is not sent anywhere except through a meeting you create from an event: its title and attendee names then become part of that meeting.
+- Generating a summary sends that meeting's transcript, notes and agenda text to the AI connection chosen in Settings: Anthropic, OpenAI or your compatible service, or the Claude Code or Codex tool on this computer, which forwards it to its own service. A local model in Ollama or LM Studio keeps it on your computer. Meeting content is sent only when you press Generate or Test AI connection, and with Copy prompt it goes only where you paste it. Check that the tool you choose is approved for meeting content at your organisation. Calendar data is not sent anywhere except through a meeting you create from an event: its title and attendee names then become part of that meeting.
 - Calendar events are read from Microsoft Graph (or your calendar link) and kept in memory only for a few minutes. They are not saved to disk.
 - Join links are opened only when they point to Teams, Zoom, Google Meet, Webex or GoTo, because invites are written by other people.
 - Your API key, Outlook refresh token and calendar-link secret are encrypted with Windows secure storage.
@@ -115,6 +154,12 @@ Calendar integration follows Microsoft's [device code flow](https://learn.micros
 - `npx electron tests/update-feed-smoke.cjs` checks the published package-version feed and downloads/checksums the installer into isolated test data without installing it.
 - `npm run dist -- --publish never` builds the verified Windows installer without automatic publishing.
 - Code layout: `src/` main process, `renderer/` interface and audio capture.
+
+## Building the Windows installer
+
+Double-click `build-installer.bat`. It installs dependencies if needed, runs the tests and builds `dist\MeetNotes Setup <version>.exe`. The installer lets you choose the folder and adds desktop and Start menu shortcuts. It is unsigned, so Windows SmartScreen may show "Windows protected your PC": choose More info, then Run anyway.
+
+Pushing a version tag also builds and publishes the installer automatically, see below.
 
 ## Publishing app updates
 

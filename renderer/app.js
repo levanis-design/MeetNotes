@@ -243,7 +243,8 @@
   function updatePending() {
     const el = $('pending');
     el.hidden = state.pending === 0;
-    el.textContent = state.pending ? `Transcribing ${state.pending} segment${state.pending === 1 ? '' : 's'}...` : '';
+    const behind = state.pending > 4 ? ' Catching up. If this keeps growing, choose a faster speech model in Settings.' : '';
+    el.textContent = state.pending ? `Transcribing ${state.pending} segment${state.pending === 1 ? '' : 's'}...${behind}` : '';
   }
 
   function renderNotes() {
@@ -503,7 +504,21 @@
     if (s.hasOutlook) return `Connected${s.outlookAccount ? ' as ' + s.outlookAccount : ''}. MeetNotes can only read your calendar.`;
     return s.hasIcs ? 'Not signed in. The calendar link below is being used.' : 'Not connected.';
   }
+  function calendarStateText(s) {
+    if (s.hasOutlook) return `Using the Microsoft sign-in${s.outlookAccount ? ' (' + s.outlookAccount + ')' : ''}.`;
+    if (s.outlookDesktop) return 'Using Outlook on this computer.';
+    if (s.hasIcs) return 'Using a published calendar link.';
+    return 'Not connected.';
+  }
+  function showAiFields(provider) {
+    $('aiAnthropic').hidden = provider !== 'anthropic';
+    $('aiOpenai').hidden = provider !== 'openai';
+    $('aiCli').hidden = provider !== 'claude-cli' && provider !== 'codex-cli';
+  }
   function refreshCalendarSettings(s) {
+    $('calState').textContent = calendarStateText(s);
+    $('odConnect').textContent = s.outlookDesktop ? 'Check Outlook connection' : 'Use Outlook on this computer';
+    $('odDisconnect').hidden = !s.outlookDesktop;
     $('olState').textContent = outlookStateText(s);
     $('olConnect').textContent = s.hasOutlook ? 'Reconnect Outlook' : 'Connect Outlook';
     $('olDisconnect').hidden = !s.hasOutlook;
@@ -523,6 +538,13 @@
     $('sModel').value = s.model;
     $('sWhisper').value = s.whisperModel;
     $('keyState').textContent = s.hasKey ? 'An API key is saved on this computer.' : 'No API key saved yet.';
+    $('sAiProvider').value = s.aiProvider || 'anthropic';
+    showAiFields($('sAiProvider').value);
+    $('sOaKey').value = '';
+    $('oaKeyState').textContent = s.hasOpenaiKey ? 'An API key is saved on this computer.' : 'No API key saved yet.';
+    $('sOaBase').value = s.openaiBaseUrl || '';
+    $('sOaModel').value = s.openaiModel || '';
+    $('sCliPath').value = s.cliPath || '';
     $('sMiniAppearance').value = s.miniAppearance;
     $('sMiniOpacity').value = s.miniOpacity;
     $('sMiniOpacityVal').textContent = s.miniOpacity + '%';
@@ -546,13 +568,20 @@
       autoTasks: $('sAutoTasks').checked,
       outlookClientId: $('sOlClient').value,
       outlookTenant: $('sOlTenant').value,
+      aiProvider: $('sAiProvider').value,
+      openaiBaseUrl: $('sOaBase').value,
+      openaiModel: $('sOaModel').value,
+      cliPath: $('sCliPath').value,
     };
+    const oaKey = $('sOaKey').value.trim();
+    if (oaKey) patch.openaiKey = oaKey;
     const ics = $('sIcs').value.trim();
     if (ics) patch.icsUrl = ics;
     const key = $('sKey').value.trim();
     if (key) patch.apiKey = key;
     state.settings = await api.setSettings(patch);
     if (ics) $('sIcs').value = '';
+    if (oaKey) { $('sOaKey').value = ''; $('oaKeyState').textContent = 'An API key is saved on this computer.'; }
     refreshCalendarSettings(state.settings);
     if (dash()) dash().refresh(true);
   }
@@ -608,6 +637,28 @@
       toast('Markdown copied');
     } catch (e) { toast('Copy failed: ' + errText(e), true); }
   });
+  $('promptBtn').addEventListener('click', async () => {
+    const m = state.cur;
+    if (!m) return;
+    if (isLive() || state.transitioning) return toast('End the meeting first.', true);
+    try {
+      await api.aiPrompt(m.id, $('genInstruction').value);
+      toast('Prompt copied. Paste it into Copilot, ChatGPT, Claude.ai or another AI tool. When it answers, copy the whole reply and choose "Paste AI reply".', false, 12000);
+    } catch (e) { toast(errText(e), true, 9000); }
+  });
+  $('pasteBtn').addEventListener('click', async () => {
+    const m = state.cur;
+    if (!m) return;
+    if (isLive() || state.transitioning) return toast('End the meeting first.', true);
+    try {
+      const updated = await api.aiImport(m.id);
+      if (state.cur && state.cur.id === m.id) { state.cur = updated; await renderSummary(); }
+      const added = updated.tasksAdded || 0;
+      toast(added ? `Summary imported. ${added} action item${added === 1 ? '' : 's'} added to Tasks.` : 'Summary imported.');
+      loadList();
+      if (dash()) dash().tasksChanged();
+    } catch (e) { toast(errText(e), true, 9000); }
+  });
   $('mdBtn').addEventListener('click', () => runExport(api.exportMarkdown, 'Markdown'));
   $('pdfBtn').addEventListener('click', () => runExport(api.exportPdf, 'PDF'));
   $('txBtn').addEventListener('click', () => runExport(api.exportTranscript, 'Transcript'));
@@ -638,15 +689,43 @@
       toast('Previewing the widget for a few seconds.');
     } catch (e) { toast('Preview failed: ' + errText(e), true); }
   });
+  $('sAiProvider').addEventListener('change', (e) => showAiFields(e.target.value));
   $('sTest').addEventListener('click', async () => {
     try {
+      const hadKey = Boolean($('sKey').value.trim());
       await saveSettings();
       $('sKey').value = '';
-      toast('Testing the key...', false, 0);
+      if (hadKey) $('keyState').textContent = 'An API key is saved on this computer.';
+      toast('Testing the AI connection...', false, 0);
       await api.testKey();
-      $('keyState').textContent = 'An API key is saved on this computer.';
-      toast('The API key works.');
-    } catch (e) { toast('Key test failed: ' + errText(e), true, 8000); }
+      toast('The AI connection works.');
+    } catch (e) { toast('AI connection test failed: ' + errText(e), true, 9000); }
+  });
+  // ---------- Outlook on this computer ----------
+  $('odConnect').addEventListener('click', async () => {
+    try {
+      await saveSettings();
+      $('odConnect').disabled = true;
+      toast('Reading the calendar from Outlook on this computer...', false, 0);
+      const r = await api.outlookDesktopConnect();
+      const s = await api.getSettings();
+      state.settings = s;
+      refreshCalendarSettings(s);
+      toast(`Outlook connected${r.account ? ' for ' + r.account : ''}. ${r.count} event${r.count === 1 ? '' : 's'} in the next two weeks.`);
+      if (dash()) dash().refresh(true);
+    } catch (e) {
+      toast(errText(e), true, 12000);
+    } finally {
+      $('odConnect').disabled = false;
+    }
+  });
+  $('odDisconnect').addEventListener('click', async () => {
+    await api.outlookDesktopDisconnect();
+    const s = await api.getSettings();
+    state.settings = s;
+    refreshCalendarSettings(s);
+    toast('MeetNotes no longer reads Outlook on this computer.');
+    if (dash()) dash().refresh(true);
   });
   // ---------- Outlook sign-in ----------
   function olReset() {

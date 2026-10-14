@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { isCorner, isSize } = require('./mini-layout');
 const { normalizeIcsUrl } = require('./links');
+const { PROVIDERS } = require('./providers');
 
 const ID_PATTERN = /^m_\d+$/;
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -44,6 +45,12 @@ function createStore(baseDir, cipher) {
     outlookTokenEnc: null,
     outlookAccount: '',
     icsUrlEnc: null,
+    outlookDesktop: false,   // read the calendar from Outlook on this computer (no sign-in)
+    aiProvider: 'anthropic', // see providers.js
+    openaiKeyEnc: null,
+    openaiBaseUrl: 'https://api.openai.com/v1',
+    openaiModel: 'gpt-5',
+    cliPath: '',             // optional full path to the claude or codex command
   };
 
   function readSettings() {
@@ -81,6 +88,12 @@ function createStore(baseDir, cipher) {
       hasOutlook: Boolean(s.outlookTokenEnc),
       outlookAccount: s.outlookAccount,
       hasIcs: Boolean(s.icsUrlEnc),
+      outlookDesktop: Boolean(s.outlookDesktop),
+      aiProvider: PROVIDERS.includes(s.aiProvider) ? s.aiProvider : 'anthropic',
+      hasOpenaiKey: Boolean(s.openaiKeyEnc),
+      openaiBaseUrl: s.openaiBaseUrl,
+      openaiModel: s.openaiModel,
+      cliPath: s.cliPath,
     };
   }
 
@@ -99,6 +112,21 @@ function createStore(baseDir, cipher) {
       const v = patch.outlookTenant.trim() || 'common';
       if (!TENANT.test(v)) throw new Error('The Directory (tenant) value should be a tenant ID, a domain name, or "common".');
     }
+    if (typeof patch.aiProvider === 'string' && !PROVIDERS.includes(patch.aiProvider)) throw new Error('Unknown AI connection.');
+    if (typeof patch.openaiBaseUrl === 'string' && patch.openaiBaseUrl.trim() && !/^https?:\/\/[^\s]+$/i.test(patch.openaiBaseUrl.trim())) {
+      throw new Error('The API address should start with https:// (or http://localhost for a local model).');
+    }
+    if (typeof patch.cliPath === 'string' && /[&|<>^%"\r\n]/.test(patch.cliPath)) {
+      throw new Error('The command path contains characters that are not allowed. Enter a plain path such as C:\\Users\\you\\AppData\\Roaming\\npm\\claude.cmd');
+    }
+    if (typeof patch.aiProvider === 'string') s.aiProvider = patch.aiProvider;
+    if (typeof patch.openaiBaseUrl === 'string') s.openaiBaseUrl = patch.openaiBaseUrl.trim() || defaults.openaiBaseUrl;
+    if (typeof patch.openaiModel === 'string' && patch.openaiModel.trim()) s.openaiModel = patch.openaiModel.trim().slice(0, 120);
+    if (typeof patch.cliPath === 'string') s.cliPath = patch.cliPath.trim().slice(0, 400);
+    if (typeof patch.openaiKey === 'string') {
+      s.openaiKeyEnc = patch.openaiKey.trim() ? cipher.encrypt(patch.openaiKey.trim()) : null;
+    }
+    if (typeof patch.outlookDesktop === 'boolean') s.outlookDesktop = patch.outlookDesktop;
     if (typeof patch.model === 'string' && patch.model.trim()) s.model = patch.model.trim();
     if (typeof patch.whisperModel === 'string' && patch.whisperModel.trim()) s.whisperModel = patch.whisperModel.trim();
     if (typeof patch.apiKey === 'string') {
@@ -133,6 +161,25 @@ function createStore(baseDir, cipher) {
   function getApiKey() {
     const s = readSettings();
     return s.apiKeyEnc ? cipher.decrypt(s.apiKeyEnc) : null;
+  }
+
+  function getOpenaiKey() {
+    const s = readSettings();
+    return s.openaiKeyEnc ? cipher.decrypt(s.openaiKeyEnc) : null;
+  }
+
+  // Everything the selected AI connection needs, including decrypted keys. Main process only.
+  function getAiConfig() {
+    const s = getSettings();
+    return {
+      provider: s.aiProvider,
+      anthropicKey: getApiKey(),
+      model: s.model,
+      openaiKey: getOpenaiKey(),
+      openaiBaseUrl: s.openaiBaseUrl,
+      openaiModel: s.openaiModel,
+      cliPath: s.cliPath,
+    };
   }
 
   function getOutlookRefresh() {
@@ -270,7 +317,7 @@ function createStore(baseDir, cipher) {
   }
 
   return {
-    getSettings, setSettings, getApiKey, getOutlookRefresh, setOutlookRefresh, getIcsUrl, findByCalendarEvent,
+    getSettings, setSettings, getApiKey, getOpenaiKey, getAiConfig, getOutlookRefresh, setOutlookRefresh, getIcsUrl, findByCalendarEvent,
     create, list, get, update, appendTranscript, addNote, setSummary, remove, wipeAll,
   };
 }

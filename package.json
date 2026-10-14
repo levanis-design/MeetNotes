@@ -1,14 +1,14 @@
 {
   "name": "meetnotes",
   "productName": "MeetNotes",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Personal meeting tracker with local transcription, notes and after-meeting agenda",
   "main": "src/main.js",
   "private": true,
   "license": "UNLICENSED",
   "scripts": {
     "start": "electron .",
-    "test": "node --test tests/logic.test.js tests/features.test.js tests/calendar.test.js tests/capture.test.js tests/updates.test.js",
+    "test": "node --test tests/logic.test.js tests/features.test.js tests/calendar.test.js tests/capture.test.js tests/updates.test.js tests/connectors.test.js",
     "dist": "electron-builder --win"
   },
   "dependencies": {
@@ -27,7 +27,9 @@
     "files": [
       "src/**/*",
       "renderer/**/*",
-      "package.json"
+      "package.json",
+      "!**/*.bak",
+      "!**/*.tmp"
     ],
     "asarUnpack": [
       "src/whisper-worker.js",
@@ -36,13 +38,23 @@
       "node_modules/@img/**"
     ],
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "build/icon.png"
     },
     "publish": {
       "provider": "github",
       "owner": "levanis-design",
       "repo": "MeetNotes",
       "releaseType": "release"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "MeetNotes",
+      "runAfterFinish": true
     }
   },
   "author": "levanis-design"

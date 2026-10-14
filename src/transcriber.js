@@ -14,8 +14,9 @@ function toFloat32(input) {
 }
 
 class Transcriber {
-  constructor({ modelName, cacheDir, onStatus }) {
+  constructor({ modelName, cacheDir, onStatus, fetchImpl }) {
     this.modelName = modelName;
+    this.fetchImpl = fetchImpl || ((url, init) => fetch(url, init));
     this.cacheDir = cacheDir;
     this.onStatus = onStatus || (() => {});
     this.worker = null;
@@ -40,7 +41,35 @@ class Transcriber {
     });
   }
 
+  async proxyFetch(msg) {
+    const worker = this.worker;
+    try {
+      const res = await this.fetchImpl(msg.url, { method: msg.method, headers: msg.headers });
+      const headers = {};
+      res.headers.forEach((v, k) => {
+        // The body arrives already decompressed, so drop encoding headers.
+        if (k !== 'content-encoding' && k !== 'content-length') headers[k] = v;
+      });
+      const body = msg.method === 'HEAD' ? null : await res.arrayBuffer();
+      if (worker && this.worker === worker) {
+        worker.postMessage(
+          { type: 'fetch-result', id: msg.id, ok: true, status: res.status, statusText: res.statusText, headers, body },
+          body ? [body] : []
+        );
+      }
+    } catch (err) {
+      const cause = err && err.cause ? ` (${err.cause.code || err.cause.message || err.cause})` : '';
+      if (worker && this.worker === worker) {
+        worker.postMessage({ type: 'fetch-result', id: msg.id, ok: false, message: `${msg.url}: ${err && err.message ? err.message : err}${cause}` });
+      }
+    }
+  }
+
   handle(msg) {
+    if (msg.type === 'fetch') {
+      this.proxyFetch(msg);
+      return;
+    }
     if (msg.type === 'status') {
       if (msg.state === 'ready') {
         this.state = 'ready';
