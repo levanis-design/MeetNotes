@@ -14,6 +14,7 @@
     base: 0,
     paused: false,
     pending: 0,
+    skipped: 0,
     last: null,
     levels: { you: 0, others: 0 },
     settings: null,
@@ -240,10 +241,18 @@
     [...state.cur.transcript].sort((a, b) => a.t - b.t).forEach(addTranscriptRow);
     updatePending();
   }
+  // Segments are up to 25 seconds each. Past BEHIND_AT the computer is not keeping up with live audio;
+  // past MAX_PENDING new speech is skipped so memory use stays bounded on slow computers.
+  const BEHIND_AT = 5;
+  const MAX_PENDING = 40;
+  // Ending a meeting waits this long for queued speech, then lets the rest finish in the background.
+  const STOP_WAIT_MS = 90000;
+
   function updatePending() {
     const el = $('pending');
     el.hidden = state.pending === 0;
-    const behind = state.pending > 4 ? ' Catching up. If this keeps growing, choose a faster speech model in Settings.' : '';
+    el.classList.toggle('warn', state.pending >= BEHIND_AT);
+    const behind = state.pending >= BEHIND_AT ? ' Catching up. If this keeps growing, choose a faster speech model in Settings.' : '';
     el.textContent = state.pending ? `Transcribing ${state.pending} segment${state.pending === 1 ? '' : 's'}...${behind}` : '';
   }
 
@@ -318,6 +327,7 @@
       state.segStart = Date.now();
       state.paused = false;
       state.last = null;
+      state.skipped = 0;
       state.levels = { you: 0, others: 0 };
       state.capture = await window.startCapture({
         getElapsed: elapsed,
@@ -369,6 +379,11 @@
 
   async function handleSegment({ source, t, samples }) {
     const meetingId = state.cur.id;
+    if (state.pending >= MAX_PENDING) {
+      state.skipped++;
+      toast(`This computer cannot keep up with live transcription, so ${state.skipped} segment${state.skipped === 1 ? ' was' : 's were'} skipped. Type key points as notes.`, true, 9000);
+      return;
+    }
     state.pending++;
     updatePending();
     try {
@@ -400,7 +415,9 @@
       if (state.capture) await state.capture.stop();
       state.capture = null;
       toast('Finishing transcription...', false, 0);
-      while (state.pending > 0) await new Promise((r) => setTimeout(r, 300));
+      const waitUntil = Date.now() + STOP_WAIT_MS;
+      while (state.pending > 0 && Date.now() < waitUntil) await new Promise((r) => setTimeout(r, 300));
+      const unfinished = state.pending;
       hideToast();
       const patch = { status: 'ended', endedAt: new Date().toISOString(), elapsedSec: Math.round(total) };
       Object.assign(m, patch);
@@ -412,7 +429,9 @@
       renderMeeting();
       showTab('summary');
       showView('meetings');
-      toast('Meeting ended. Generate the summary and after-meeting agenda when ready.');
+      toast(unfinished
+        ? `Meeting ended. ${unfinished} segment${unfinished === 1 ? ' is' : 's are'} still being transcribed; wait for them before generating the summary.`
+        : 'Meeting ended. Generate the summary and after-meeting agenda when ready.', Boolean(unfinished), unfinished ? 9000 : undefined);
       loadList();
     } catch (e) {
       toast('Could not end cleanly: ' + errText(e), true, 9000);
@@ -425,6 +444,7 @@
   async function generate() {
     const m = state.cur;
     if (!m || isLive() || state.transitioning) return toast('End the meeting before generating its summary.', true);
+    if (state.pending) return toast('Some speech is still being transcribed. Generate the summary when it finishes.', true);
     $('genBtn').disabled = true;
     toast('Generating summary and agenda...', false, 0);
     try {

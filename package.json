@@ -8,7 +8,7 @@
   "license": "UNLICENSED",
   "scripts": {
     "start": "electron .",
-    "test": "node --test tests/logic.test.js tests/features.test.js tests/calendar.test.js tests/capture.test.js tests/updates.test.js tests/connectors.test.js",
+    "test": "node --test tests/logic.test.js tests/features.test.js tests/calendar.test.js tests/capture.test.js tests/updates.test.js tests/connectors.test.js tests/reliability.test.js",
     "dist": "electron-builder --win"
   },
   "dependencies": {

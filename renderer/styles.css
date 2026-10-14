@@ -220,6 +220,7 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round
 .m-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .banner { margin: 12px 0 0; padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); color: var(--muted); }
 .banner.warn { color: var(--danger); border-color: var(--danger); }
+#pending.warn { color: var(--danger); }
 .tabs { display: flex; gap: 4px; margin: 14px 0 0; border-bottom: 1px solid var(--border); }
 .tab { border: none; border-bottom: 2px solid transparent; border-radius: 0; background: none; padding: 8px 14px; }
 .tab.active { border-bottom-color: var(--accent); font-weight: 600; }

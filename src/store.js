@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { isCorner, isSize } = require('./mini-layout');
 const { normalizeIcsUrl } = require('./links');
+const { writeAtomic, readJson, removeWithBackup } = require('./fsutil');
 const { PROVIDERS } = require('./providers');
 
 const ID_PATTERN = /^m_\d+$/;
@@ -17,11 +18,6 @@ function snippet(text, n) {
 }
 const UPDATABLE = ['title', 'attendees', 'agendaPre', 'status', 'startedAt', 'endedAt', 'elapsedSec', 'notes', 'calendarEventId'];
 
-function writeAtomic(file, data) {
-  const tmp = file + '.tmp';
-  fs.writeFileSync(tmp, data);
-  fs.renameSync(tmp, file);
-}
 
 function createStore(baseDir, cipher) {
   const meetingsDir = path.join(baseDir, 'meetings');
@@ -55,7 +51,7 @@ function createStore(baseDir, cipher) {
 
   function readSettings() {
     try {
-      return { ...defaults, ...JSON.parse(fs.readFileSync(settingsFile, 'utf8')) };
+      return { ...defaults, ...readJson(settingsFile) };
     } catch {
       return { ...defaults };
     }
@@ -204,7 +200,7 @@ function createStore(baseDir, cipher) {
   }
 
   function get(id) {
-    return JSON.parse(fs.readFileSync(fileFor(id), 'utf8'));
+    return readJson(fileFor(id));
   }
 
   function write(meeting) {
@@ -252,7 +248,7 @@ function createStore(baseDir, cipher) {
     for (const f of fs.readdirSync(meetingsDir)) {
       if (!f.endsWith('.json')) continue;
       try {
-        const m = JSON.parse(fs.readFileSync(path.join(meetingsDir, f), 'utf8'));
+        const m = readJson(path.join(meetingsDir, f));
         out.push({
           id: m.id,
           title: m.title,
@@ -308,7 +304,7 @@ function createStore(baseDir, cipher) {
   }
 
   function remove(id) {
-    fs.rmSync(fileFor(id), { force: true });
+    removeWithBackup(fileFor(id));
   }
 
   function wipeAll() {
