@@ -6,6 +6,10 @@ Reviewed on October 13, 2026. Package version: 1.4.0. Source branch: `features-e
 
 The reviewed source passes the checks below, and the Windows installer builds successfully. This is not a guarantee that the app is free of defects. The account, hardware and installation checks below remain necessary before a public release.
 
+## CI installation follow-up
+
+The initial uploaded lockfile omitted optional peer dependencies because the local npm user configuration enabled `legacy-peer-deps`. Regenerated the lockfile with normal peer resolution and added a project `.npmrc` setting `legacy-peer-deps=false`. A real `npm ci` now succeeds; all 82 tests and desktop checks pass after the clean install. This fixes the GitHub Actions lockfile mismatch.
+
 ## Fixed during this review
 
 - Prevented delayed note and summary responses from appearing in a different meeting after navigation; added desktop regressions. Note submission clears immediately to prevent duplicate clicks and reports save failures.
