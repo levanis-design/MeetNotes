@@ -34,6 +34,15 @@ function jsonResponse(status, body) {
   return { ok: status >= 200 && status < 300, status, text: async () => JSON.stringify(body) };
 }
 
+test('API addresses preserve query parameters and require an exact loopback hostname for keyless requests', async () => {
+  assert.equal(providers.chatUrl('https://x.openai.azure.com/openai/deployments/model/chat/completions?api-version=2024-10-21'),
+    'https://x.openai.azure.com/openai/deployments/model/chat/completions?api-version=2024-10-21');
+  assert.equal(providers.chatUrl('https://gateway.example/v1/?route=summary'), 'https://gateway.example/v1/chat/completions?route=summary');
+  let contacted = false;
+  await assert.rejects(providers.openai({ baseUrl: 'http://localhost.example/v1', model: 'm', user: 'private notes', fetchImpl: async () => { contacted = true; } }), /API key/);
+  assert.equal(contacted, false);
+});
+
 // Fake child process for the command-line connectors.
 function fakeSpawn({ stdout = '', stderr = '', code = 0, onRun }) {
   const calls = [];

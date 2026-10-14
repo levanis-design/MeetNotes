@@ -209,18 +209,22 @@
   }
 
   // ---------- meeting view ----------
+  let openMeetingSeq = 0;
   async function openMeeting(id, opts) {
     if (state.transitioning) return toast('Please wait for recording to finish starting or stopping.', true);
     if (isLive() && state.cur.id !== id) {
       toast('End the current meeting before opening another one.', true);
       return;
     }
+    const seq = ++openMeetingSeq;
     let m = await api.getMeeting(id);
+    if (seq !== openMeetingSeq) return;
     // A meeting left "live" by a closed window or a crash has no recording running any more.
     if (m.status === 'live' && !state.capture) {
       const lastT = (m.transcript || []).reduce((mx, x) => Math.max(mx, x.t || 0), 0);
       const patch = { status: 'ended', endedAt: new Date().toISOString(), elapsedSec: Math.max(m.elapsedSec || 0, Math.round(lastT)) };
       m = await api.updateMeeting(id, patch);
+      if (seq !== openMeetingSeq) return;
       loadList();
     }
     state.cur = m;
@@ -383,7 +387,9 @@
     }
   }
 
+  let summarySeq = 0;
   async function renderSummary() {
+    const seq = ++summarySeq;
     const m = state.cur;
     const has = Boolean(m.summary);
     $('copyBtn').disabled = !has;
@@ -395,7 +401,16 @@
       box.innerHTML = '<p class="muted">Nothing generated yet. End the meeting, then generate the summary and after-meeting agenda.</p>';
       return;
     }
-    box.innerHTML = await api.renderHtml(m.id); // HTML is escaped in the main process
+    box.textContent = 'Loading summary...';
+    try {
+      const html = await api.renderHtml(m.id);
+      if (seq === summarySeq && state.cur && state.cur.id === m.id) box.innerHTML = html; // escaped in the main process
+    } catch (e) {
+      if (seq === summarySeq && state.cur && state.cur.id === m.id) {
+        box.textContent = 'Could not load the summary.';
+        toast(errText(e), true);
+      }
+    }
   }
 
   // ---------- editing ----------
@@ -417,12 +432,18 @@
     const input = $('noteInput');
     const text = input.value.trim();
     if (!text || !state.cur) return;
-    const note = await api.addNote(state.cur.id, { t: isLive() ? elapsed() : null, text });
-    if (note) {
-      state.cur.notes.push(note);
-      renderNotes();
-    }
+    const m = state.cur;
     input.value = '';
+    try {
+      const note = await api.addNote(m.id, { t: isLive() ? elapsed() : null, text });
+      if (note && state.cur && state.cur.id === m.id) {
+        state.cur.notes.push(note);
+        renderNotes();
+      }
+    } catch (e) {
+      if (state.cur && state.cur.id === m.id && !input.value) input.value = text;
+      toast('Could not save the note: ' + errText(e), true, 9000);
+    }
   }
 
   // ---------- meeting lifecycle ----------

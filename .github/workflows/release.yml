@@ -24,6 +24,8 @@ jobs:
           if ($env:GITHUB_EVENT_NAME -eq 'push' -and $env:GITHUB_REF_NAME -ne "v$version") { throw "Release tag must match package.json version" }
       - run: npm ci
       - run: npm test
+      - name: Desktop regression checks
+        run: npx electron tests/electron-smoke.cjs
       - name: Build installer and update metadata
         run: npm run dist -- --publish never
       - name: Verify release files

@@ -53,7 +53,7 @@ function readJson(file) {
 }
 
 function removeWithBackup(file) {
-  for (const f of [file, file + '.bak', file + '.tmp']) withRetry(() => fs.rmSync(f, { force: true }));
+  for (const f of [file, file + '.bak', file + '.tmp', file + '.damaged']) withRetry(() => fs.rmSync(f, { force: true }));
 }
 
 module.exports = { writeAtomic, readJson, removeWithBackup };

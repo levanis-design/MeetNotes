@@ -25,6 +25,11 @@ let outlookDesktop = null;
 let transcriber = null;
 let updates = null;
 
+// Two processes must not write the same local JSON files or capture a meeting twice.
+const primaryInstance = app.requestSingleInstanceLock();
+if (!primaryInstance) app.quit();
+else app.on('second-instance', () => showMain());
+
 let live = false;            // a meeting is being recorded
 let miniState = null;        // last state sent by the main window
 let miniDismissed = false;   // user closed the widget during this meeting
@@ -509,6 +514,7 @@ function registerCalendarIpc() {
 }
 
 app.whenReady().then(() => {
+  if (!primaryInstance) return;
   store = createStore(app.getPath('userData'), cipher);
   tasks = createTaskStore(app.getPath('userData'));
   outlook = createOutlook({

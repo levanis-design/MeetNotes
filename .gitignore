@@ -8,3 +8,4 @@ dist/
 tools/publish-local.cjs
 *.bak
 *.tmp
+*.damaged

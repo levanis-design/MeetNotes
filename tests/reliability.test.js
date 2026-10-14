@@ -40,6 +40,7 @@ test('store: a damaged meeting file still opens and still lists', () => {
   assert.deepEqual(s.get(m.id).transcript.map((x) => x.text), ['kept line']);
   assert.equal(s.list().length, 1);
   s.remove(m.id);
+  assert.equal(fs.existsSync(path.join(dir, 'meetings', m.id + '.json.damaged')), false, 'deletion removes the damaged copy too');
   assert.equal(s.list().length, 0);
   assert.throws(() => s.get(m.id), /ENOENT/, 'a deleted meeting does not come back from its backup');
 });
@@ -65,6 +66,15 @@ test('tasks: a damaged task file is recovered', () => {
   const titles = t.list().map((x) => x.title);
   assert.ok(titles.includes('Send budget'));
   assert.ok(titles.includes('Call vendor'));
+});
+
+test('tasks: changing or clearing an uncertain due date replaces its old label', () => {
+  const t = createTaskStore(tmp());
+  const task = t.add({ title: 'Send budget', due: 'Next Friday' });
+  assert.equal(t.update(task.id, { due: 'After review' }).dueText, 'After review');
+  const cleared = t.update(task.id, { due: '' });
+  assert.equal(cleared.due, null);
+  assert.equal(cleared.dueText, '');
 });
 
 function fakeTranscriber(stallMs) {

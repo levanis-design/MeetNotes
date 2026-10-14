@@ -101,7 +101,7 @@ function createTaskStore(baseDir) {
     if ('due' in patch) {
       const v = String(patch.due || '').trim();
       t.due = isIsoDate(v) ? v : null;
-      if (t.due) t.dueText = '';
+      t.dueText = !t.due && v && !TBC.test(v) ? v.slice(0, 80) : '';
       edited = true;
     }
     if ('owner' in patch) { t.owner = cleanOwner(patch.owner); edited = true; }

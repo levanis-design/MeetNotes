@@ -9,6 +9,9 @@
 - Weeks start on Monday by default (Settings > You and your tasks > Week starts on). Weekly progress, this week's action items and the calendar follow the setting.
 
 ## Reliability
+- Delayed notes and summaries stay attached to the correct meeting when switching views. Only one MeetNotes process can write to local data at a time.
+- Deleting a recovered meeting also removes its damaged recovery copy. Clearing an uncertain task due date removes its old label.
+- API addresses retain query parameters, including Azure API-version parameters. Windows builds use an included ICO icon.
 - Meetings, tasks and settings keep the previous version on every save and recover it if a file is damaged.
 - Speech recognition restarts if it stops responding. Ending a meeting waits at most 90 seconds for queued speech. Transcription backlog is capped on slow computers.
 

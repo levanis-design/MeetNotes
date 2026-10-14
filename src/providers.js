@@ -47,19 +47,23 @@ async function anthropic({ apiKey, model, system, user, maxTokens = 6000, fetchI
 
 // ---------- OpenAI and compatible ----------
 function chatUrl(baseUrl) {
-  const base = String(baseUrl || 'https://api.openai.com/v1').trim().replace(/\/+$/, '');
-  return /\/chat\/completions$/.test(base) ? base : base + '/chat/completions';
+  const url = new URL(String(baseUrl || 'https://api.openai.com/v1').trim());
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) throw new Error('Enter an HTTP or HTTPS API address without embedded credentials.');
+  const base = url.pathname.replace(/\/+$/, '');
+  url.pathname = /\/chat\/completions$/.test(base) ? base : base + '/chat/completions';
+  return url.href;
 }
 
 async function openai({ apiKey, baseUrl, model, system, user, fetchImpl = fetch }) {
   const url = chatUrl(baseUrl);
-  const local = /^http:\/\/(localhost|127\.0\.0\.1)/i.test(url);
+  const hostname = new URL(url).hostname;
+  const local = ['localhost', '127.0.0.1', '[::1]'].includes(hostname);
   if (!apiKey && !local) throw new Error('Add your OpenAI (or compatible service) API key in Settings first.');
   if (!model) throw new Error('Enter the model name for the OpenAI-compatible service in Settings.');
   const headers = { 'Content-Type': 'application/json' };
   if (apiKey) {
     headers.Authorization = `Bearer ${apiKey}`;
-    if (/azure/i.test(url)) headers['api-key'] = apiKey;
+    if (hostname.endsWith('.openai.azure.com') || hostname.endsWith('.cognitiveservices.azure.com')) headers['api-key'] = apiKey;
   }
   const messages = [];
   if (system) messages.push({ role: 'system', content: system });
