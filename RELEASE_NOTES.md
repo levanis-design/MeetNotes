@@ -1,3 +1,17 @@
+# Unreleased
+
+## Notes and transcripts
+- Correct a transcript line by clicking it. Clearing the text removes the line. Corrected lines are marked "edited" and the summary uses the corrected text.
+- Search looks inside every meeting: titles, attendees, agenda, notes, transcript lines and summaries. Results show where the match is and a highlighted excerpt.
+- "Export summary and transcript" saves one Markdown or text file with the summary, agenda, notes and full transcript.
+
+## Weeks
+- Weeks start on Monday by default (Settings > You and your tasks > Week starts on). Weekly progress, this week's action items and the calendar follow the setting.
+
+## Reliability
+- Meetings, tasks and settings keep the previous version on every save and recover it if a file is damaged.
+- Speech recognition restarts if it stops responding. Ending a meeting waits at most 90 seconds for queued speech. Transcription backlog is capped on slow computers.
+
 # MeetNotes v1.4.0
 
 ## AI summary connections

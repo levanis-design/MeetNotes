@@ -14,6 +14,7 @@
     base: 0,
     paused: false,
     pending: 0,
+    results: null,
     skipped: 0,
     last: null,
     levels: { you: 0, others: 0 },
@@ -121,12 +122,76 @@
       ul.append(li);
     }
   }
+  // Searching looks inside every meeting (notes, transcript, summary), not just titles.
+  let searchSeq = 0;
+  const runSearch = debounce(async () => {
+    const q = $('search').value.trim();
+    const seq = ++searchSeq;
+    if (!q) { state.results = null; return renderList(); }
+    try {
+      const results = await api.searchMeetings(q);
+      if (seq !== searchSeq) return;
+      state.results = { q, items: results };
+    } catch (e) {
+      state.results = null;
+      toast('Search failed: ' + errText(e), true);
+    }
+    renderList();
+  }, 200);
+
+  function highlight(el, text, q) {
+    const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+    const lower = text.toLowerCase();
+    let i = 0;
+    while (i < text.length) {
+      let at = -1, len = 0;
+      for (const w of words) {
+        const j = lower.indexOf(w, i);
+        if (j >= 0 && (at < 0 || j < at)) { at = j; len = w.length; }
+      }
+      if (at < 0) { el.append(text.slice(i)); break; }
+      el.append(text.slice(i, at));
+      const mk = document.createElement('mark');
+      mk.textContent = text.slice(at, at + len);
+      el.append(mk);
+      i = at + len;
+    }
+  }
+
+  function renderResults(ul) {
+    const { q, items } = state.results;
+    if (!items.length) {
+      const li = document.createElement('li');
+      li.className = 'li-empty';
+      li.textContent = `No meetings mention "${q}".`;
+      ul.append(li);
+      return;
+    }
+    for (const r of items) {
+      const li = document.createElement('li');
+      if (state.cur && state.cur.id === r.id) li.className = 'sel';
+      const t = document.createElement('div');
+      t.className = 'li-title';
+      t.textContent = r.title;
+      const s = document.createElement('div');
+      s.className = 'li-sub';
+      const d = new Date(r.date);
+      const at = r.t !== null ? ` at ${fmt(r.t)}` : '';
+      s.textContent = `${r.where}${at} · ${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}${r.hits > 1 ? ` · ${r.hits} matches` : ''}`;
+      const hit = document.createElement('div');
+      hit.className = 'li-hit';
+      highlight(hit, r.snippet, q);
+      li.append(t, s, hit);
+      li.addEventListener('click', () => openMeeting(r.id));
+      ul.append(li);
+    }
+  }
+
   function renderList() {
-    const q = $('search').value.trim().toLowerCase();
     const ul = $('list');
     ul.textContent = '';
+    if (state.results && $('search').value.trim()) return renderResults(ul);
     for (const m of state.meetings) {
-      if (q && !m.title.toLowerCase().includes(q)) continue;
       const li = document.createElement('li');
       if (state.cur && state.cur.id === m.id) li.className = 'sel';
       const t = document.createElement('div');
@@ -231,10 +296,57 @@
     who.className = 'who';
     who.textContent = item.source === 'you' ? 'You' : 'Others';
     const text = document.createElement('span');
+    text.className = 'txt';
     text.textContent = item.text;
+    text.title = 'Click to correct this line';
+    if (item.edited) p.classList.add('edited');
+    text.addEventListener('click', () => editTranscriptRow(p, text, item));
     p.append(t, who, text);
     box.append(p);
     if (nearBottom) box.scrollTop = box.scrollHeight;
+  }
+
+  function editTranscriptRow(p, span, item) {
+    if (p.querySelector('input')) return;
+    const meetingId = state.cur.id;
+    const input = document.createElement('input');
+    input.className = 'tx-edit';
+    input.value = item.text;
+    input.setAttribute('aria-label', 'Correct transcript line');
+    span.hidden = true;
+    p.append(input);
+    input.focus();
+    let done = false;
+    const close = () => { input.remove(); span.hidden = false; };
+    const save = async () => {
+      if (done) return;
+      done = true;
+      const newText = input.value.trim();
+      if (newText === item.text) return close();
+      try {
+        const updated = await api.editTranscript(meetingId, { t: item.t, source: item.source, text: item.text, newText });
+        const list = state.cur && state.cur.id === meetingId ? state.cur.transcript : [];
+        const i = list.indexOf(item);
+        if (!updated) {
+          if (i >= 0) list.splice(i, 1);
+          p.remove();
+          toast('Transcript line removed.');
+          return;
+        }
+        Object.assign(item, updated);
+        span.textContent = item.text;
+        p.classList.add('edited');
+        close();
+      } catch (e) {
+        close();
+        toast('Could not save the correction: ' + errText(e), true, 7000);
+      }
+    };
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); save(); }
+      else if (e.key === 'Escape') { done = true; close(); }
+    });
+    input.addEventListener('blur', save);
   }
   function renderTranscript() {
     $('transcript').textContent = '';
@@ -550,6 +662,7 @@
     state.settings = s;
     $('sName').value = s.myName || '';
     $('sAutoTasks').checked = s.autoTasks;
+    $('sWeekStart').value = s.weekStart || 'monday';
     $('sOlClient').value = s.outlookClientId || '';
     $('sOlTenant').value = s.outlookTenant || 'common';
     $('sIcs').value = '';
@@ -586,6 +699,7 @@
       autoMini: $('sAutoMini').checked,
       myName: $('sName').value,
       autoTasks: $('sAutoTasks').checked,
+      weekStart: $('sWeekStart').value,
       outlookClientId: $('sOlClient').value,
       outlookTenant: $('sOlTenant').value,
       aiProvider: $('sAiProvider').value,
@@ -624,7 +738,7 @@
     showTab('meeting');
   });
 
-  $('search').addEventListener('input', renderList);
+  $('search').addEventListener('input', runSearch);
   $('startBtn').addEventListener('click', startMeeting);
   $('stopBtn').addEventListener('click', stopMeeting);
   $('pauseBtn').addEventListener('click', () => (state.paused ? resumeMeeting() : pauseMeeting()));
@@ -682,6 +796,7 @@
   $('mdBtn').addEventListener('click', () => runExport(api.exportMarkdown, 'Markdown'));
   $('pdfBtn').addEventListener('click', () => runExport(api.exportPdf, 'PDF'));
   $('txBtn').addEventListener('click', () => runExport(api.exportTranscript, 'Transcript'));
+  $('fullBtn').addEventListener('click', () => runExport(api.exportFull, 'Summary and transcript'));
 
   $('settingsBtn').addEventListener('click', () => openSettings());
   $('updateCheck').addEventListener('click', () => updateAction(api.checkUpdates));

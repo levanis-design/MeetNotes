@@ -339,6 +339,8 @@ function registerIpc() {
   ipcMain.handle('meetings:get', (e, id) => store.get(id));
   ipcMain.handle('meetings:update', (e, id, patch) => store.update(id, patch || {}));
   ipcMain.handle('meetings:addNote', (e, id, note) => store.addNote(id, note || {}));
+  ipcMain.handle('meetings:editTranscript', (e, id, change) => store.editTranscript(id, change || {}));
+  ipcMain.handle('meetings:search', (e, query) => store.search(query));
   ipcMain.handle('meetings:remove', (e, id) => store.remove(id));
   ipcMain.handle('data:wipe', async () => {
     const r = await dialog.showMessageBox(win, {
@@ -414,6 +416,12 @@ function registerIpc() {
     const m = store.get(id);
     return saveWithDialog(`${safeName(m.title)}.md`, [{ name: 'Markdown', extensions: ['md'] }], (f) =>
       fs.promises.writeFile(f, render.renderMarkdown(m), 'utf8'));
+  });
+  ipcMain.handle('export:full', async (e, id) => {
+    const m = store.get(id);
+    return saveWithDialog(`${safeName(m.title)} summary and transcript.md`,
+      [{ name: 'Markdown', extensions: ['md'] }, { name: 'Text', extensions: ['txt'] }],
+      (f) => fs.promises.writeFile(f, render.renderMarkdown(m, { withTranscript: true }), 'utf8'));
   });
   ipcMain.handle('export:transcript', async (e, id) => {
     const m = store.get(id);

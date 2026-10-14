@@ -3,7 +3,7 @@
 // Pure function: no Electron, no disk, no network, so it can be tested directly.
 const { isMine, ymd } = require('./tasks');
 
-// Weeks run Sunday to Saturday, matching the calendar on the dashboard.
+// weekStartsOn: 0 for Sunday to Saturday, 1 for Monday to Sunday (Settings > Week starts on).
 function weekRange(now, weekStartsOn = 0) {
   const d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const back = (d.getDay() - weekStartsOn + 7) % 7;
@@ -28,9 +28,9 @@ function byDue(a, b) {
 
 function meetingDate(m) { return m.startedAt || m.createdAt || ''; }
 
-function buildDashboard({ meetings = [], tasks = [], events = [], now = new Date(), myName = '' } = {}) {
+function buildDashboard({ meetings = [], tasks = [], events = [], now = new Date(), myName = '', weekStartsOn = 0 } = {}) {
   const today = ymd(now);
-  const week = weekRange(now);
+  const week = weekRange(now, weekStartsOn);
   const inWeek = (iso) => {
     if (!iso) return false;
     const d = ymd(new Date(iso));
@@ -65,6 +65,7 @@ function buildDashboard({ meetings = [], tasks = [], events = [], now = new Date
   return {
     greeting: { part: dayPart(now), name: String(myName || '').trim().split(/\s+/)[0] || '' },
     week,
+    weekStartsOn,
     today,
     recent: sortedMeetings.slice(0, 3).map((m) => ({
       id: m.id, title: m.title, date: meetingDate(m), status: m.status,

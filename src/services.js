@@ -61,11 +61,13 @@ function createServices({ store, tasks, outlook, outlookDesktop = null, fetchIcs
 
   async function dashboard(opts) {
     const n = now();
-    const weekStart = new Date(n.getFullYear(), n.getMonth(), n.getDate() - n.getDay());
+    const settings = store.getSettings();
+    const weekStartsOn = settings.weekStart === 'sunday' ? 0 : 1;
+    const back = (n.getDay() - weekStartsOn + 7) % 7;
+    const weekStart = new Date(n.getFullYear(), n.getMonth(), n.getDate() - back);
     const to = new Date(n.getFullYear(), n.getMonth(), n.getDate() + 14);
     const cal = await getEvents(weekStart, to, Boolean(opts && opts.force));
-    const settings = store.getSettings();
-    const data = buildDashboard({ meetings: store.list(), tasks: tasks.list(), events: cal.events, now: n, myName: settings.myName });
+    const data = buildDashboard({ meetings: store.list(), tasks: tasks.list(), events: cal.events, now: n, myName: settings.myName, weekStartsOn });
     data.calendar = { source: cal.source, error: cal.error || null, account: settings.outlookAccount || '' };
     return data;
   }

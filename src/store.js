@@ -19,6 +19,27 @@ function snippet(text, n) {
 const UPDATABLE = ['title', 'attendees', 'agendaPre', 'status', 'startedAt', 'endedAt', 'elapsedSec', 'notes', 'calendarEventId'];
 
 
+// Every string inside a summary, so search covers decisions, action items and the follow-up agenda.
+function summaryTexts(summary) {
+  const out = [];
+  const walk = (v) => {
+    if (typeof v === 'string') { if (v && !TBC.test(v)) out.push(v); }
+    else if (Array.isArray(v)) v.forEach(walk);
+    else if (v && typeof v === 'object') Object.values(v).forEach(walk);
+  };
+  walk(summary);
+  return out;
+}
+
+// A short excerpt of text centred on the first match.
+function around(text, word, n) {
+  const t = String(text || '').replace(/\s+/g, ' ').trim();
+  const i = t.toLowerCase().indexOf(word);
+  if (t.length <= n || i < 0) return snippet(t, n);
+  const start = Math.max(0, Math.min(i - Math.floor(n / 3), t.length - n));
+  return (start > 0 ? '…' : '') + t.slice(start, start + n).trim() + (start + n < t.length ? '…' : '');
+}
+
 function createStore(baseDir, cipher) {
   const meetingsDir = path.join(baseDir, 'meetings');
   const settingsFile = path.join(baseDir, 'settings.json');
@@ -35,6 +56,7 @@ function createStore(baseDir, cipher) {
     autoMini: true,
     mainAlwaysOnTop: false,
     myName: '',
+    weekStart: 'monday', // 'monday' or 'sunday'
     autoTasks: true,
     outlookClientId: '',
     outlookTenant: 'common',
@@ -78,6 +100,7 @@ function createStore(baseDir, cipher) {
       autoMini: s.autoMini,
       mainAlwaysOnTop: s.mainAlwaysOnTop,
       myName: s.myName,
+      weekStart: s.weekStart === 'sunday' ? 'sunday' : 'monday',
       autoTasks: s.autoTasks,
       outlookClientId: s.outlookClientId,
       outlookTenant: s.outlookTenant,
@@ -137,6 +160,7 @@ function createStore(baseDir, cipher) {
     if (typeof patch.autoMini === 'boolean') s.autoMini = patch.autoMini;
     if (typeof patch.mainAlwaysOnTop === 'boolean') s.mainAlwaysOnTop = patch.mainAlwaysOnTop;
     if (typeof patch.myName === 'string') s.myName = patch.myName.trim().slice(0, 80);
+    if (patch.weekStart === 'monday' || patch.weekStart === 'sunday') s.weekStart = patch.weekStart;
     if (typeof patch.autoTasks === 'boolean') s.autoTasks = patch.autoTasks;
     // Changing the app registration or directory makes the saved Outlook sign-in invalid.
     if (typeof patch.outlookClientId === 'string') {
@@ -287,6 +311,58 @@ function createStore(baseDir, cipher) {
     return item;
   }
 
+  // Corrects or removes one transcript line. The line is found by its time, speaker and current text,
+  // because new lines can arrive and shift positions while a live meeting is being edited.
+  function editTranscript(id, { t, source, text, newText } = {}) {
+    const m = get(id);
+    const i = m.transcript.findIndex((x) => x.t === t && x.source === source && x.text === text);
+    if (i < 0) throw new Error('That transcript line has changed. Reopen the meeting and try again.');
+    const value = String(newText || '').replace(/\s+/g, ' ').trim();
+    if (!value) {
+      m.transcript.splice(i, 1);
+      write(m);
+      return null;
+    }
+    const item = { ...m.transcript[i], text: value.slice(0, 5000), edited: true };
+    m.transcript[i] = item;
+    write(m);
+    return item;
+  }
+
+  // Finds meetings whose title, attendees, agenda, notes, transcript or summary contain every word of the query.
+  function search(query, limit = 50) {
+    const words = String(query || '').toLowerCase().split(/\s+/).filter(Boolean).slice(0, 8);
+    if (!words.length) return [];
+    const out = [];
+    for (const f of fs.readdirSync(meetingsDir)) {
+      if (!f.endsWith('.json')) continue;
+      let m;
+      try { m = readJson(path.join(meetingsDir, f)); } catch { continue; }
+      const fields = [
+        { where: 'Title', text: m.title },
+        { where: 'Attendees', text: m.attendees },
+        { where: 'Agenda', text: m.agendaPre },
+        ...(m.notes || []).map((n) => ({ where: 'Note', t: n.t, text: n.text })),
+        ...(m.transcript || []).map((x) => ({ where: x.source === 'you' ? 'You' : 'Others', t: x.t, text: x.text })),
+        ...summaryTexts(m.summary).map((text) => ({ where: 'Summary', text })),
+      ].filter((x) => x.text);
+      const all = fields.map((x) => String(x.text).toLowerCase()).join('\n');
+      if (!words.every((w) => all.includes(w))) continue;
+      const hits = fields.filter((x) => words.some((w) => String(x.text).toLowerCase().includes(w)));
+      const best = hits.find((x) => words.every((w) => String(x.text).toLowerCase().includes(w))) || hits[0];
+      out.push({
+        id: m.id,
+        title: m.title,
+        date: m.startedAt || m.createdAt,
+        hits: hits.length,
+        where: best.where,
+        t: typeof best.t === 'number' ? best.t : null,
+        snippet: around(best.text, words[0], 140),
+      });
+    }
+    return out.sort((a, b) => (a.date < b.date ? 1 : -1)).slice(0, limit);
+  }
+
   function addNote(id, note) {
     const m = get(id);
     const item = { t: typeof note.t === 'number' ? note.t : null, text: String(note.text || '').trim() };
@@ -314,7 +390,7 @@ function createStore(baseDir, cipher) {
 
   return {
     getSettings, setSettings, getApiKey, getOpenaiKey, getAiConfig, getOutlookRefresh, setOutlookRefresh, getIcsUrl, findByCalendarEvent,
-    create, list, get, update, appendTranscript, addNote, setSummary, remove, wipeAll,
+    create, list, get, update, appendTranscript, editTranscript, search, addNote, setSummary, remove, wipeAll,
   };
 }
 

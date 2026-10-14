@@ -129,7 +129,7 @@
                 <div id="calLabel" class="cal-label">October 2026</div>
                 <button id="calNext" class="icon-btn" aria-label="Next month"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></button>
               </div>
-              <div class="cal-week" aria-hidden="true"><span>Su</span><span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span></div>
+              <div id="calWeek" class="cal-week" aria-hidden="true"><span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span><span>Su</span></div>
               <div id="calGrid" class="cal-grid" role="grid" aria-labelledby="calLabel"></div>
               <div class="cal-foot"><button id="calToday" class="link" type="button">Go to today</button></div>
             </article>
@@ -152,7 +152,7 @@
         <div id="mlist">
           <div class="side-top">
             <button id="newBtn" class="primary">New meeting</button>
-            <input id="search" type="search" placeholder="Search meetings" aria-label="Search meetings">
+            <input id="search" type="search" placeholder="Search titles, notes, transcripts, summaries" aria-label="Search all meetings">
           </div>
           <ul id="list"></ul>
         </div>
@@ -201,7 +201,7 @@
                 <ul id="notes" class="notes"></ul>
               </div>
               <div class="col">
-                <div class="label">Live transcript</div>
+                <div class="label">Live transcript <span class="hint">Click a line to correct it. Clear the text to remove it.</span></div>
                 <div id="transcript" class="transcript"></div>
                 <p id="pending" class="muted" hidden></p>
               </div>
@@ -217,6 +217,7 @@
                 <button id="mdBtn" class="exp" disabled>Export Markdown</button>
                 <button id="pdfBtn" class="exp" disabled>Export PDF</button>
                 <button id="txBtn" class="exp">Export transcript</button>
+                <button id="fullBtn" class="exp" title="One file with the summary, agenda, notes and full transcript">Export summary and transcript</button>
               </div>
               <div class="export-bar">
                 <button id="promptBtn" class="exp" title="Copies the meeting and instructions, to paste into Copilot, ChatGPT, Claude.ai or any AI tool">Copy prompt for any AI</button>
@@ -291,6 +292,8 @@
       <label class="label" for="sName">Your name</label>
       <input id="sName" placeholder="Used for the dashboard greeting and to tell your tasks from other people's">
       <label class="check"><input type="checkbox" id="sAutoTasks"> Add a meeting's action items to Tasks when a summary is generated</label>
+      <label class="label" for="sWeekStart">Week starts on</label>
+      <select id="sWeekStart"><option value="monday">Monday</option><option value="sunday">Sunday</option></select>
 
       <h3 id="olSection">Outlook calendar</h3>
       <p id="calState" class="muted"></p>

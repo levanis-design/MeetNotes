@@ -13,6 +13,8 @@ contextBridge.exposeInMainWorld('api', {
   getMeeting: (id) => invoke('meetings:get', id),
   updateMeeting: (id, patch) => invoke('meetings:update', id, patch),
   addNote: (id, note) => invoke('meetings:addNote', id, note),
+  editTranscript: (id, change) => invoke('meetings:editTranscript', id, change),
+  searchMeetings: (query) => invoke('meetings:search', query),
   removeMeeting: (id) => invoke('meetings:remove', id),
   wipeAll: () => invoke('data:wipe'),
 
@@ -28,6 +30,7 @@ contextBridge.exposeInMainWorld('api', {
   exportMarkdown: (id) => invoke('export:markdown', id),
   exportPdf: (id) => invoke('export:pdf', id),
   exportTranscript: (id) => invoke('export:transcript', id),
+  exportFull: (id) => invoke('export:full', id),
 
   openExternal: (url) => invoke('shell:open', url),
 
