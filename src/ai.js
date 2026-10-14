@@ -105,47 +105,61 @@ function normalize(raw) {
   };
 }
 
-function responseText(resp) {
-  return (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
-}
+const providers = require('./providers');
 
-function makeClient(apiKey) {
-  const Anthropic = require('@anthropic-ai/sdk');
-  const Ctor = Anthropic.default || Anthropic;
-  return new Ctor({ apiKey });
-}
-
-async function generateSummary({ apiKey, model, meeting, instruction, client }) {
+function checkContent(meeting) {
   const hasContent = (meeting.transcript || []).length || (meeting.notes || []).length;
   if (!hasContent) throw new Error('There is no transcript or notes to summarize yet.');
+}
+
+// cfg: AI connection settings (see providers.complete). For compatibility, apiKey/model/client
+// alone select the Anthropic API.
+async function generateSummary({ cfg, apiKey, model, meeting, instruction, client, fetchImpl, spawnImpl }) {
+  checkContent(meeting);
   const message = buildUserMessage(meeting, instruction);
   if (message.length > MAX_TRANSCRIPT_CHARS) {
     throw new Error('This meeting is too long to summarize in one request. Trim the transcript or split the meeting.');
   }
-  const c = client || makeClient(apiKey);
-  const resp = await c.messages.create({
-    model,
-    max_tokens: 6000,
-    system: SYSTEM_PROMPT,
-    messages: [{ role: 'user', content: message }],
-  });
-  if (resp.stop_reason === 'max_tokens') {
-    throw new Error('The AI response was cut off. Try again, or add an instruction asking for a shorter summary.');
-  }
-  return normalize(extractJson(responseText(resp)));
+  const conn = cfg || { provider: 'anthropic', anthropicKey: apiKey, model };
+  const text = await providers.complete(conn, { system: SYSTEM_PROMPT, user: message, maxTokens: 6000, fetchImpl, spawnImpl, client });
+  return normalize(extractJson(text));
 }
 
-async function testKey({ apiKey, model, client }) {
-  const c = client || makeClient(apiKey);
-  const resp = await c.messages.create({
-    model,
-    max_tokens: 16,
-    messages: [{ role: 'user', content: 'Reply with the single word: ok' }],
+async function testConnection({ cfg, apiKey, model, client, fetchImpl, spawnImpl }) {
+  const conn = cfg || { provider: 'anthropic', anthropicKey: apiKey, model };
+  const text = await providers.complete(conn, {
+    system: '',
+    user: 'Reply with the single word: ok',
+    maxTokens: 16,
+    fetchImpl,
+    spawnImpl,
+    client,
   });
-  return responseText(resp).trim().length > 0;
+  if (!String(text || '').trim()) throw new Error('The AI connection answered with an empty reply.');
+  return true;
+}
+const testKey = testConnection;
+
+// For any AI tool without a connector (Microsoft Copilot, ChatGPT, Claude.ai, Gemini):
+// the user copies this prompt, pastes it into the tool, and pastes the reply back.
+function manualPrompt(meeting, instruction) {
+  checkContent(meeting);
+  return `${SYSTEM_PROMPT}\n\n---\n\n${buildUserMessage(meeting, instruction)}`;
+}
+
+function importSummary(text) {
+  const t = String(text || '');
+  if (!t.trim()) throw new Error('The clipboard is empty. Copy the AI reply first.');
+  let raw;
+  try {
+    raw = extractJson(t);
+  } catch {
+    throw new Error('The copied text does not contain the summary in the expected format. Copy the whole AI reply, including the braces { }.');
+  }
+  return normalize(raw);
 }
 
 module.exports = {
   SYSTEM_PROMPT, TBC, mmss, transcriptText, buildUserMessage, extractJson, normalize,
-  generateSummary, testKey,
+  generateSummary, testKey, testConnection, manualPrompt, importSummary,
 };

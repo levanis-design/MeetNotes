@@ -14,6 +14,8 @@
     base: 0,
     paused: false,
     pending: 0,
+    results: null,
+    skipped: 0,
     last: null,
     levels: { you: 0, others: 0 },
     settings: null,
@@ -120,12 +122,76 @@
       ul.append(li);
     }
   }
+  // Searching looks inside every meeting (notes, transcript, summary), not just titles.
+  let searchSeq = 0;
+  const runSearch = debounce(async () => {
+    const q = $('search').value.trim();
+    const seq = ++searchSeq;
+    if (!q) { state.results = null; return renderList(); }
+    try {
+      const results = await api.searchMeetings(q);
+      if (seq !== searchSeq) return;
+      state.results = { q, items: results };
+    } catch (e) {
+      state.results = null;
+      toast('Search failed: ' + errText(e), true);
+    }
+    renderList();
+  }, 200);
+
+  function highlight(el, text, q) {
+    const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+    const lower = text.toLowerCase();
+    let i = 0;
+    while (i < text.length) {
+      let at = -1, len = 0;
+      for (const w of words) {
+        const j = lower.indexOf(w, i);
+        if (j >= 0 && (at < 0 || j < at)) { at = j; len = w.length; }
+      }
+      if (at < 0) { el.append(text.slice(i)); break; }
+      el.append(text.slice(i, at));
+      const mk = document.createElement('mark');
+      mk.textContent = text.slice(at, at + len);
+      el.append(mk);
+      i = at + len;
+    }
+  }
+
+  function renderResults(ul) {
+    const { q, items } = state.results;
+    if (!items.length) {
+      const li = document.createElement('li');
+      li.className = 'li-empty';
+      li.textContent = `No meetings mention "${q}".`;
+      ul.append(li);
+      return;
+    }
+    for (const r of items) {
+      const li = document.createElement('li');
+      if (state.cur && state.cur.id === r.id) li.className = 'sel';
+      const t = document.createElement('div');
+      t.className = 'li-title';
+      t.textContent = r.title;
+      const s = document.createElement('div');
+      s.className = 'li-sub';
+      const d = new Date(r.date);
+      const at = r.t !== null ? ` at ${fmt(r.t)}` : '';
+      s.textContent = `${r.where}${at} · ${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}${r.hits > 1 ? ` · ${r.hits} matches` : ''}`;
+      const hit = document.createElement('div');
+      hit.className = 'li-hit';
+      highlight(hit, r.snippet, q);
+      li.append(t, s, hit);
+      li.addEventListener('click', () => openMeeting(r.id));
+      ul.append(li);
+    }
+  }
+
   function renderList() {
-    const q = $('search').value.trim().toLowerCase();
     const ul = $('list');
     ul.textContent = '';
+    if (state.results && $('search').value.trim()) return renderResults(ul);
     for (const m of state.meetings) {
-      if (q && !m.title.toLowerCase().includes(q)) continue;
       const li = document.createElement('li');
       if (state.cur && state.cur.id === m.id) li.className = 'sel';
       const t = document.createElement('div');
@@ -143,18 +209,22 @@
   }
 
   // ---------- meeting view ----------
+  let openMeetingSeq = 0;
   async function openMeeting(id, opts) {
     if (state.transitioning) return toast('Please wait for recording to finish starting or stopping.', true);
     if (isLive() && state.cur.id !== id) {
       toast('End the current meeting before opening another one.', true);
       return;
     }
+    const seq = ++openMeetingSeq;
     let m = await api.getMeeting(id);
+    if (seq !== openMeetingSeq) return;
     // A meeting left "live" by a closed window or a crash has no recording running any more.
     if (m.status === 'live' && !state.capture) {
       const lastT = (m.transcript || []).reduce((mx, x) => Math.max(mx, x.t || 0), 0);
       const patch = { status: 'ended', endedAt: new Date().toISOString(), elapsedSec: Math.max(m.elapsedSec || 0, Math.round(lastT)) };
       m = await api.updateMeeting(id, patch);
+      if (seq !== openMeetingSeq) return;
       loadList();
     }
     state.cur = m;
@@ -230,20 +300,76 @@
     who.className = 'who';
     who.textContent = item.source === 'you' ? 'You' : 'Others';
     const text = document.createElement('span');
+    text.className = 'txt';
     text.textContent = item.text;
+    text.title = 'Click to correct this line';
+    if (item.edited) p.classList.add('edited');
+    text.addEventListener('click', () => editTranscriptRow(p, text, item));
     p.append(t, who, text);
     box.append(p);
     if (nearBottom) box.scrollTop = box.scrollHeight;
+  }
+
+  function editTranscriptRow(p, span, item) {
+    if (p.querySelector('input')) return;
+    const meetingId = state.cur.id;
+    const input = document.createElement('input');
+    input.className = 'tx-edit';
+    input.value = item.text;
+    input.setAttribute('aria-label', 'Correct transcript line');
+    span.hidden = true;
+    p.append(input);
+    input.focus();
+    let done = false;
+    const close = () => { input.remove(); span.hidden = false; };
+    const save = async () => {
+      if (done) return;
+      done = true;
+      const newText = input.value.trim();
+      if (newText === item.text) return close();
+      try {
+        const updated = await api.editTranscript(meetingId, { t: item.t, source: item.source, text: item.text, newText });
+        const list = state.cur && state.cur.id === meetingId ? state.cur.transcript : [];
+        const i = list.indexOf(item);
+        if (!updated) {
+          if (i >= 0) list.splice(i, 1);
+          p.remove();
+          toast('Transcript line removed.');
+          return;
+        }
+        Object.assign(item, updated);
+        span.textContent = item.text;
+        p.classList.add('edited');
+        close();
+      } catch (e) {
+        close();
+        toast('Could not save the correction: ' + errText(e), true, 7000);
+      }
+    };
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); save(); }
+      else if (e.key === 'Escape') { done = true; close(); }
+    });
+    input.addEventListener('blur', save);
   }
   function renderTranscript() {
     $('transcript').textContent = '';
     [...state.cur.transcript].sort((a, b) => a.t - b.t).forEach(addTranscriptRow);
     updatePending();
   }
+  // Segments are up to 25 seconds each. Past BEHIND_AT the computer is not keeping up with live audio;
+  // past MAX_PENDING new speech is skipped so memory use stays bounded on slow computers.
+  const BEHIND_AT = 5;
+  const MAX_PENDING = 40;
+  // Ending a meeting waits this long for queued speech, then lets the rest finish in the background.
+  const STOP_WAIT_MS = 90000;
+
   function updatePending() {
     const el = $('pending');
     el.hidden = state.pending === 0;
-    el.textContent = state.pending ? `Transcribing ${state.pending} segment${state.pending === 1 ? '' : 's'}...` : '';
+    el.classList.toggle('warn', state.pending >= BEHIND_AT);
+    const behind = state.pending >= BEHIND_AT ? ' Catching up. If this keeps growing, choose a faster speech model in Settings.' : '';
+    el.textContent = state.pending ? `Transcribing ${state.pending} segment${state.pending === 1 ? '' : 's'}...${behind}` : '';
   }
 
   function renderNotes() {
@@ -261,7 +387,9 @@
     }
   }
 
+  let summarySeq = 0;
   async function renderSummary() {
+    const seq = ++summarySeq;
     const m = state.cur;
     const has = Boolean(m.summary);
     $('copyBtn').disabled = !has;
@@ -273,7 +401,16 @@
       box.innerHTML = '<p class="muted">Nothing generated yet. End the meeting, then generate the summary and after-meeting agenda.</p>';
       return;
     }
-    box.innerHTML = await api.renderHtml(m.id); // HTML is escaped in the main process
+    box.textContent = 'Loading summary...';
+    try {
+      const html = await api.renderHtml(m.id);
+      if (seq === summarySeq && state.cur && state.cur.id === m.id) box.innerHTML = html; // escaped in the main process
+    } catch (e) {
+      if (seq === summarySeq && state.cur && state.cur.id === m.id) {
+        box.textContent = 'Could not load the summary.';
+        toast(errText(e), true);
+      }
+    }
   }
 
   // ---------- editing ----------
@@ -295,12 +432,18 @@
     const input = $('noteInput');
     const text = input.value.trim();
     if (!text || !state.cur) return;
-    const note = await api.addNote(state.cur.id, { t: isLive() ? elapsed() : null, text });
-    if (note) {
-      state.cur.notes.push(note);
-      renderNotes();
-    }
+    const m = state.cur;
     input.value = '';
+    try {
+      const note = await api.addNote(m.id, { t: isLive() ? elapsed() : null, text });
+      if (note && state.cur && state.cur.id === m.id) {
+        state.cur.notes.push(note);
+        renderNotes();
+      }
+    } catch (e) {
+      if (state.cur && state.cur.id === m.id && !input.value) input.value = text;
+      toast('Could not save the note: ' + errText(e), true, 9000);
+    }
   }
 
   // ---------- meeting lifecycle ----------
@@ -317,6 +460,7 @@
       state.segStart = Date.now();
       state.paused = false;
       state.last = null;
+      state.skipped = 0;
       state.levels = { you: 0, others: 0 };
       state.capture = await window.startCapture({
         getElapsed: elapsed,
@@ -368,6 +512,11 @@
 
   async function handleSegment({ source, t, samples }) {
     const meetingId = state.cur.id;
+    if (state.pending >= MAX_PENDING) {
+      state.skipped++;
+      toast(`This computer cannot keep up with live transcription, so ${state.skipped} segment${state.skipped === 1 ? ' was' : 's were'} skipped. Type key points as notes.`, true, 9000);
+      return;
+    }
     state.pending++;
     updatePending();
     try {
@@ -399,7 +548,9 @@
       if (state.capture) await state.capture.stop();
       state.capture = null;
       toast('Finishing transcription...', false, 0);
-      while (state.pending > 0) await new Promise((r) => setTimeout(r, 300));
+      const waitUntil = Date.now() + STOP_WAIT_MS;
+      while (state.pending > 0 && Date.now() < waitUntil) await new Promise((r) => setTimeout(r, 300));
+      const unfinished = state.pending;
       hideToast();
       const patch = { status: 'ended', endedAt: new Date().toISOString(), elapsedSec: Math.round(total) };
       Object.assign(m, patch);
@@ -411,7 +562,9 @@
       renderMeeting();
       showTab('summary');
       showView('meetings');
-      toast('Meeting ended. Generate the summary and after-meeting agenda when ready.');
+      toast(unfinished
+        ? `Meeting ended. ${unfinished} segment${unfinished === 1 ? ' is' : 's are'} still being transcribed; wait for them before generating the summary.`
+        : 'Meeting ended. Generate the summary and after-meeting agenda when ready.', Boolean(unfinished), unfinished ? 9000 : undefined);
       loadList();
     } catch (e) {
       toast('Could not end cleanly: ' + errText(e), true, 9000);
@@ -424,6 +577,7 @@
   async function generate() {
     const m = state.cur;
     if (!m || isLive() || state.transitioning) return toast('End the meeting before generating its summary.', true);
+    if (state.pending) return toast('Some speech is still being transcribed. Generate the summary when it finishes.', true);
     $('genBtn').disabled = true;
     toast('Generating summary and agenda...', false, 0);
     try {
@@ -503,7 +657,21 @@
     if (s.hasOutlook) return `Connected${s.outlookAccount ? ' as ' + s.outlookAccount : ''}. MeetNotes can only read your calendar.`;
     return s.hasIcs ? 'Not signed in. The calendar link below is being used.' : 'Not connected.';
   }
+  function calendarStateText(s) {
+    if (s.hasOutlook) return `Using the Microsoft sign-in${s.outlookAccount ? ' (' + s.outlookAccount + ')' : ''}.`;
+    if (s.outlookDesktop) return 'Using Outlook on this computer.';
+    if (s.hasIcs) return 'Using a published calendar link.';
+    return 'Not connected.';
+  }
+  function showAiFields(provider) {
+    $('aiAnthropic').hidden = provider !== 'anthropic';
+    $('aiOpenai').hidden = provider !== 'openai';
+    $('aiCli').hidden = provider !== 'claude-cli' && provider !== 'codex-cli';
+  }
   function refreshCalendarSettings(s) {
+    $('calState').textContent = calendarStateText(s);
+    $('odConnect').textContent = s.outlookDesktop ? 'Check Outlook connection' : 'Use Outlook on this computer';
+    $('odDisconnect').hidden = !s.outlookDesktop;
     $('olState').textContent = outlookStateText(s);
     $('olConnect').textContent = s.hasOutlook ? 'Reconnect Outlook' : 'Connect Outlook';
     $('olDisconnect').hidden = !s.hasOutlook;
@@ -515,6 +683,7 @@
     state.settings = s;
     $('sName').value = s.myName || '';
     $('sAutoTasks').checked = s.autoTasks;
+    $('sWeekStart').value = s.weekStart || 'monday';
     $('sOlClient').value = s.outlookClientId || '';
     $('sOlTenant').value = s.outlookTenant || 'common';
     $('sIcs').value = '';
@@ -523,6 +692,13 @@
     $('sModel').value = s.model;
     $('sWhisper').value = s.whisperModel;
     $('keyState').textContent = s.hasKey ? 'An API key is saved on this computer.' : 'No API key saved yet.';
+    $('sAiProvider').value = s.aiProvider || 'anthropic';
+    showAiFields($('sAiProvider').value);
+    $('sOaKey').value = '';
+    $('oaKeyState').textContent = s.hasOpenaiKey ? 'An API key is saved on this computer.' : 'No API key saved yet.';
+    $('sOaBase').value = s.openaiBaseUrl || '';
+    $('sOaModel').value = s.openaiModel || '';
+    $('sCliPath').value = s.cliPath || '';
     $('sMiniAppearance').value = s.miniAppearance;
     $('sMiniOpacity').value = s.miniOpacity;
     $('sMiniOpacityVal').textContent = s.miniOpacity + '%';
@@ -544,15 +720,23 @@
       autoMini: $('sAutoMini').checked,
       myName: $('sName').value,
       autoTasks: $('sAutoTasks').checked,
+      weekStart: $('sWeekStart').value,
       outlookClientId: $('sOlClient').value,
       outlookTenant: $('sOlTenant').value,
+      aiProvider: $('sAiProvider').value,
+      openaiBaseUrl: $('sOaBase').value,
+      openaiModel: $('sOaModel').value,
+      cliPath: $('sCliPath').value,
     };
+    const oaKey = $('sOaKey').value.trim();
+    if (oaKey) patch.openaiKey = oaKey;
     const ics = $('sIcs').value.trim();
     if (ics) patch.icsUrl = ics;
     const key = $('sKey').value.trim();
     if (key) patch.apiKey = key;
     state.settings = await api.setSettings(patch);
     if (ics) $('sIcs').value = '';
+    if (oaKey) { $('sOaKey').value = ''; $('oaKeyState').textContent = 'An API key is saved on this computer.'; }
     refreshCalendarSettings(state.settings);
     if (dash()) dash().refresh(true);
   }
@@ -575,7 +759,7 @@
     showTab('meeting');
   });
 
-  $('search').addEventListener('input', renderList);
+  $('search').addEventListener('input', runSearch);
   $('startBtn').addEventListener('click', startMeeting);
   $('stopBtn').addEventListener('click', stopMeeting);
   $('pauseBtn').addEventListener('click', () => (state.paused ? resumeMeeting() : pauseMeeting()));
@@ -608,9 +792,32 @@
       toast('Markdown copied');
     } catch (e) { toast('Copy failed: ' + errText(e), true); }
   });
+  $('promptBtn').addEventListener('click', async () => {
+    const m = state.cur;
+    if (!m) return;
+    if (isLive() || state.transitioning) return toast('End the meeting first.', true);
+    try {
+      await api.aiPrompt(m.id, $('genInstruction').value);
+      toast('Prompt copied. Paste it into Copilot, ChatGPT, Claude.ai or another AI tool. When it answers, copy the whole reply and choose "Paste AI reply".', false, 12000);
+    } catch (e) { toast(errText(e), true, 9000); }
+  });
+  $('pasteBtn').addEventListener('click', async () => {
+    const m = state.cur;
+    if (!m) return;
+    if (isLive() || state.transitioning) return toast('End the meeting first.', true);
+    try {
+      const updated = await api.aiImport(m.id);
+      if (state.cur && state.cur.id === m.id) { state.cur = updated; await renderSummary(); }
+      const added = updated.tasksAdded || 0;
+      toast(added ? `Summary imported. ${added} action item${added === 1 ? '' : 's'} added to Tasks.` : 'Summary imported.');
+      loadList();
+      if (dash()) dash().tasksChanged();
+    } catch (e) { toast(errText(e), true, 9000); }
+  });
   $('mdBtn').addEventListener('click', () => runExport(api.exportMarkdown, 'Markdown'));
   $('pdfBtn').addEventListener('click', () => runExport(api.exportPdf, 'PDF'));
   $('txBtn').addEventListener('click', () => runExport(api.exportTranscript, 'Transcript'));
+  $('fullBtn').addEventListener('click', () => runExport(api.exportFull, 'Summary and transcript'));
 
   $('settingsBtn').addEventListener('click', () => openSettings());
   $('updateCheck').addEventListener('click', () => updateAction(api.checkUpdates));
@@ -638,15 +845,43 @@
       toast('Previewing the widget for a few seconds.');
     } catch (e) { toast('Preview failed: ' + errText(e), true); }
   });
+  $('sAiProvider').addEventListener('change', (e) => showAiFields(e.target.value));
   $('sTest').addEventListener('click', async () => {
     try {
+      const hadKey = Boolean($('sKey').value.trim());
       await saveSettings();
       $('sKey').value = '';
-      toast('Testing the key...', false, 0);
+      if (hadKey) $('keyState').textContent = 'An API key is saved on this computer.';
+      toast('Testing the AI connection...', false, 0);
       await api.testKey();
-      $('keyState').textContent = 'An API key is saved on this computer.';
-      toast('The API key works.');
-    } catch (e) { toast('Key test failed: ' + errText(e), true, 8000); }
+      toast('The AI connection works.');
+    } catch (e) { toast('AI connection test failed: ' + errText(e), true, 9000); }
+  });
+  // ---------- Outlook on this computer ----------
+  $('odConnect').addEventListener('click', async () => {
+    try {
+      await saveSettings();
+      $('odConnect').disabled = true;
+      toast('Reading the calendar from Outlook on this computer...', false, 0);
+      const r = await api.outlookDesktopConnect();
+      const s = await api.getSettings();
+      state.settings = s;
+      refreshCalendarSettings(s);
+      toast(`Outlook connected${r.account ? ' for ' + r.account : ''}. ${r.count} event${r.count === 1 ? '' : 's'} in the next two weeks.`);
+      if (dash()) dash().refresh(true);
+    } catch (e) {
+      toast(errText(e), true, 12000);
+    } finally {
+      $('odConnect').disabled = false;
+    }
+  });
+  $('odDisconnect').addEventListener('click', async () => {
+    await api.outlookDesktopDisconnect();
+    const s = await api.getSettings();
+    state.settings = s;
+    refreshCalendarSettings(s);
+    toast('MeetNotes no longer reads Outlook on this computer.');
+    if (dash()) dash().refresh(true);
   });
   // ---------- Outlook sign-in ----------
   function olReset() {

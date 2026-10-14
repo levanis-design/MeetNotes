@@ -106,6 +106,26 @@ app.whenReady().then(async () => {
     assert.ok(result.html.includes('Smoke A'));
     assert.ok(result.md.includes('Smoke A'));
     assert.ok(fs.readFileSync(path.join(dataDir, 'Smoke A.pdf')).subarray(0, 4).equals(Buffer.from('%PDF')));
+    // A delayed response for meeting A must not appear in meeting B.
+    const { createStore } = require(sourceRoot + 'store');
+    const testStore = createStore(dataDir, {});
+    ipcMain.removeHandler('meetings:addNote');
+    ipcMain.handle('meetings:addNote', async (_, id, note) => { await delay(300); return testStore.addNote(id, note); });
+    await run(`(async () => {
+      await MN.openMeeting(${JSON.stringify(result.a.id)});
+      document.getElementById('noteInput').value = 'Delayed note belongs to A';
+      document.getElementById('noteBtn').click();
+      await MN.openMeeting(${JSON.stringify(result.b.id)});
+    })()`);
+    await delay(400);
+    assert.equal(await run("document.getElementById('notes').textContent.includes('Delayed note belongs to A')"), false);
+    assert.ok(testStore.get(result.a.id).notes.some(n => n.text === 'Delayed note belongs to A'));
+    testStore.setSummary(result.a.id, { executive_summary: 'Summary A' });
+    ipcMain.removeHandler('render:html');
+    ipcMain.handle('render:html', async () => { await delay(300); return '<p>Delayed summary belongs to A</p>'; });
+    await run(`(async () => { await MN.openMeeting(${JSON.stringify(result.a.id)}); await MN.openMeeting(${JSON.stringify(result.b.id)}); })()`);
+    await delay(400);
+    assert.equal(await run("document.getElementById('summary').textContent.includes('Delayed summary belongs to A')"), false);
     await delay(300);
     const mini = BrowserWindow.getAllWindows().find(w => w.getTitle() === 'MeetNotes recording');
     assert.ok(mini && mini.isAlwaysOnTop(), 'floating widget is on top');

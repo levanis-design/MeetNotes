@@ -1,7 +1,7 @@
 'use strict';
 const path = require('path');
 const fs = require('fs');
-const { app, BrowserWindow, ipcMain, session, desktopCapturer, dialog, safeStorage, screen, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, session, desktopCapturer, dialog, safeStorage, screen, shell, net, clipboard } = require('electron');
 const { createStore } = require('./store');
 const { Transcriber, toFloat32 } = require('./transcriber');
 const ai = require('./ai');
@@ -13,6 +13,7 @@ const { createTaskStore } = require('./tasks');
 const { createOutlook } = require('./outlook');
 const icsCal = require('./ics');
 const { createServices } = require('./services');
+const { createOutlookDesktop } = require('./outlook-desktop');
 
 let win = null;
 let mini = null;
@@ -20,8 +21,14 @@ let store = null;
 let tasks = null;
 let outlook = null;
 let services = null;
+let outlookDesktop = null;
 let transcriber = null;
 let updates = null;
+
+// Two processes must not write the same local JSON files or capture a meeting twice.
+const primaryInstance = app.requestSingleInstanceLock();
+if (!primaryInstance) app.quit();
+else app.on('second-instance', () => showMain());
 
 let live = false;            // a meeting is being recorded
 let miniState = null;        // last state sent by the main window
@@ -63,6 +70,8 @@ function getTranscriber() {
       modelName: wanted,
       cacheDir: path.join(app.getPath('userData'), 'models'),
       onStatus: sendStatus,
+      // Chromium's network stack: Windows certificate store + system proxy.
+      fetchImpl: (url, init) => net.fetch(url, init),
     });
   }
   return transcriber;
@@ -318,15 +327,14 @@ function registerIpc() {
   ipcMain.handle('settings:get', () => store.getSettings());
   ipcMain.handle('settings:set', (e, patch) => {
     const result = store.setSettings(patch || {});
-    if (patch && ('icsUrl' in patch || 'outlookClientId' in patch || 'outlookTenant' in patch)) services.clearCalendarCache();
+    if (patch && ('icsUrl' in patch || 'outlookClientId' in patch || 'outlookTenant' in patch || 'outlookDesktop' in patch)) services.clearCalendarCache();
     sendMini('mini:settings', miniSettings());
     if (mini && !mini.isDestroyed()) applyMiniBounds();
     return result;
   });
   ipcMain.handle('settings:testKey', async () => {
-    const key = store.getApiKey();
-    if (!key) throw new Error('No API key saved.');
-    await ai.testKey({ apiKey: key, model: store.getSettings().model });
+    // Electron's network stack uses the Windows certificate store and proxy (works behind SSL inspection).
+    await ai.testConnection({ cfg: store.getAiConfig(), fetchImpl: (url, init) => net.fetch(url, init) });
     return true;
   });
 
@@ -336,6 +344,8 @@ function registerIpc() {
   ipcMain.handle('meetings:get', (e, id) => store.get(id));
   ipcMain.handle('meetings:update', (e, id, patch) => store.update(id, patch || {}));
   ipcMain.handle('meetings:addNote', (e, id, note) => store.addNote(id, note || {}));
+  ipcMain.handle('meetings:editTranscript', (e, id, change) => store.editTranscript(id, change || {}));
+  ipcMain.handle('meetings:search', (e, query) => store.search(query));
   ipcMain.handle('meetings:remove', (e, id) => store.remove(id));
   ipcMain.handle('data:wipe', async () => {
     const r = await dialog.showMessageBox(win, {
@@ -357,7 +367,15 @@ function registerIpc() {
     return true;
   });
   ipcMain.handle('audio:transcribe', async (e, { meetingId, source, t, samples }) => {
-    const text = await getTranscriber().transcribe(toFloat32(samples));
+    const audio = toFloat32(samples);
+    let text;
+    try {
+      text = await getTranscriber().transcribe(audio);
+    } catch (err) {
+      // If the speech worker crashed, getTranscriber() starts a fresh one. Retry once so the segment is not lost.
+      if (transcriber && transcriber.state === 'disposed') throw err;
+      text = await getTranscriber().transcribe(audio.slice(0));
+    }
     if (!text) return null;
     const item = { t: Math.max(0, Number(t) || 0), source: source === 'you' ? 'you' : 'others', text };
     store.appendTranscript(meetingId, item);
@@ -365,23 +383,31 @@ function registerIpc() {
   });
 
   // AI
-  ipcMain.handle('ai:generate', async (e, { id, instruction }) => {
-    const key = store.getApiKey();
-    if (!key) throw new Error('Add your Anthropic API key in Settings first.');
-    const meeting = store.get(id);
-    const summary = await ai.generateSummary({
-      apiKey: key,
-      model: store.getSettings().model,
-      meeting,
-      instruction,
-    });
+  function saveSummary(id, summary) {
     const saved = store.setSummary(id, summary);
     let tasksAdded = 0;
     if (store.getSettings().autoTasks) {
       try { tasksAdded = tasks.importFromSummary(saved).added; } catch (e) { /* the summary is saved either way */ }
     }
     return { ...saved, tasksAdded };
+  }
+  ipcMain.handle('ai:generate', async (e, { id, instruction }) => {
+    const meeting = store.get(id);
+    const summary = await ai.generateSummary({
+      cfg: store.getAiConfig(),
+      meeting,
+      instruction,
+      fetchImpl: (url, init) => net.fetch(url, init),
+    });
+    return saveSummary(id, summary);
   });
+  // Any other AI tool (Copilot, ChatGPT, Claude.ai, Gemini): copy the prompt, paste the reply back.
+  ipcMain.handle('ai:prompt', (e, { id, instruction }) => {
+    const text = ai.manualPrompt(store.get(id), instruction);
+    clipboard.writeText(text);
+    return { chars: text.length };
+  });
+  ipcMain.handle('ai:import', (e, { id }) => saveSummary(id, ai.importSummary(clipboard.readText())));
 
   ipcMain.handle('shell:open', (e, url) => {
     if (links.isAllowedExternal(url)) return shell.openExternal(url).then(() => true);
@@ -395,6 +421,12 @@ function registerIpc() {
     const m = store.get(id);
     return saveWithDialog(`${safeName(m.title)}.md`, [{ name: 'Markdown', extensions: ['md'] }], (f) =>
       fs.promises.writeFile(f, render.renderMarkdown(m), 'utf8'));
+  });
+  ipcMain.handle('export:full', async (e, id) => {
+    const m = store.get(id);
+    return saveWithDialog(`${safeName(m.title)} summary and transcript.md`,
+      [{ name: 'Markdown', extensions: ['md'] }, { name: 'Text', extensions: ['txt'] }],
+      (f) => fs.promises.writeFile(f, render.renderMarkdown(m, { withTranscript: true }), 'utf8'));
   });
   ipcMain.handle('export:transcript', async (e, id) => {
     const m = store.get(id);
@@ -456,6 +488,17 @@ function registerCalendarIpc() {
       connecting = false;
     }
   });
+  ipcMain.handle('outlookDesktop:connect', async () => {
+    const r = await outlookDesktop.test(); // fails with a clear message before anything is saved
+    store.setSettings({ outlookDesktop: true });
+    services.clearCalendarCache();
+    return r;
+  });
+  ipcMain.handle('outlookDesktop:disconnect', () => {
+    store.setSettings({ outlookDesktop: false });
+    services.clearCalendarCache();
+    return true;
+  });
   ipcMain.handle('outlook:cancel', () => { outlook.cancel(); return true; });
   ipcMain.handle('outlook:disconnect', () => { outlook.disconnect(); services.clearCalendarCache(); return true; });
   ipcMain.handle('ics:test', async () => {
@@ -471,6 +514,7 @@ function registerCalendarIpc() {
 }
 
 app.whenReady().then(() => {
+  if (!primaryInstance) return;
   store = createStore(app.getPath('userData'), cipher);
   tasks = createTaskStore(app.getPath('userData'));
   outlook = createOutlook({
@@ -481,7 +525,8 @@ app.whenReady().then(() => {
     loadRefresh: () => store.getOutlookRefresh(),
     saveRefresh: (t) => store.setOutlookRefresh(t),
   });
-  services = createServices({ store, tasks, outlook });
+  outlookDesktop = createOutlookDesktop({ isEnabled: () => store.getSettings().outlookDesktop });
+  services = createServices({ store, tasks, outlook, outlookDesktop });
   updates = createUpdates({
     updater: app.isPackaged ? require('electron-updater').autoUpdater : null,
     version: app.getVersion(),
@@ -491,6 +536,10 @@ app.whenReady().then(() => {
   setupMediaAccess();
   registerIpc();
   createWindow();
+  // Load the speech model in the background, so Start is instant when a meeting begins.
+  setTimeout(() => {
+    if (!transcriber || transcriber.state !== 'ready') getTranscriber().ensureReady().catch(() => { /* reported via model:status; retried on Start */ });
+  }, 3000);
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });

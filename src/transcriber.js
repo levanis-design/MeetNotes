@@ -13,9 +13,13 @@ function toFloat32(input) {
   throw new Error('Unsupported audio data');
 }
 
+// If requests are waiting and the worker reports nothing for this long, it is treated as stuck and restarted.
+const STALL_MS = 120000;
+
 class Transcriber {
-  constructor({ modelName, cacheDir, onStatus }) {
+  constructor({ modelName, cacheDir, onStatus, fetchImpl, stallMs }) {
     this.modelName = modelName;
+    this.fetchImpl = fetchImpl || ((url, init) => fetch(url, init));
     this.cacheDir = cacheDir;
     this.onStatus = onStatus || (() => {});
     this.worker = null;
@@ -23,6 +27,29 @@ class Transcriber {
     this.nextId = 1;
     this.state = 'idle';
     this.readyWaiters = [];
+    this.stallMs = stallMs || STALL_MS;
+    this.lastProgress = 0;
+    this.watchdog = null;
+  }
+
+  progress() {
+    this.lastProgress = Date.now();
+  }
+
+  // Runs only while requests are outstanding, so an idle app has no timer.
+  armWatchdog() {
+    if (this.watchdog || !this.pending.size) return;
+    this.watchdog = setInterval(() => {
+      if (!this.pending.size) return this.disarmWatchdog();
+      if (Date.now() - this.lastProgress > this.stallMs) {
+        this.fail(new Error('Speech recognition stopped responding and was restarted'));
+      }
+    }, Math.min(5000, this.stallMs));
+  }
+
+  disarmWatchdog() {
+    clearInterval(this.watchdog);
+    this.watchdog = null;
   }
 
   start() {
@@ -40,7 +67,36 @@ class Transcriber {
     });
   }
 
+  async proxyFetch(msg) {
+    const worker = this.worker;
+    try {
+      const res = await this.fetchImpl(msg.url, { method: msg.method, headers: msg.headers });
+      const headers = {};
+      res.headers.forEach((v, k) => {
+        // The body arrives already decompressed, so drop encoding headers.
+        if (k !== 'content-encoding' && k !== 'content-length') headers[k] = v;
+      });
+      const body = msg.method === 'HEAD' ? null : await res.arrayBuffer();
+      if (worker && this.worker === worker) {
+        worker.postMessage(
+          { type: 'fetch-result', id: msg.id, ok: true, status: res.status, statusText: res.statusText, headers, body },
+          body ? [body] : []
+        );
+      }
+    } catch (err) {
+      const cause = err && err.cause ? ` (${err.cause.code || err.cause.message || err.cause})` : '';
+      if (worker && this.worker === worker) {
+        worker.postMessage({ type: 'fetch-result', id: msg.id, ok: false, message: `${msg.url}: ${err && err.message ? err.message : err}${cause}` });
+      }
+    }
+  }
+
   handle(msg) {
+    this.progress();
+    if (msg.type === 'fetch') {
+      this.proxyFetch(msg);
+      return;
+    }
     if (msg.type === 'status') {
       if (msg.state === 'ready') {
         this.state = 'ready';
@@ -54,12 +110,14 @@ class Transcriber {
       const p = this.pending.get(msg.id);
       if (!p) return;
       this.pending.delete(msg.id);
+      if (!this.pending.size) this.disarmWatchdog();
       if (msg.type === 'result') p.resolve(msg.text);
       else p.reject(new Error(msg.message));
     }
   }
 
   fail(err) {
+    this.disarmWatchdog();
     const worker = this.worker;
     this.worker = null;
     if (worker) worker.terminate();
@@ -81,12 +139,15 @@ class Transcriber {
     this.start();
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
+      if (!this.pending.size) this.progress();
       this.pending.set(id, { resolve, reject });
+      this.armWatchdog();
       this.worker.postMessage({ type: 'transcribe', id, samples: toFloat32(samples) });
     });
   }
 
   dispose() {
+    this.disarmWatchdog();
     this.state = 'disposed';
     if (this.worker) this.worker.terminate();
     this.worker = null;

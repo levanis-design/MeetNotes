@@ -1,3 +1,48 @@
+# Unreleased
+
+## Notes and transcripts
+- Correct a transcript line by clicking it. Clearing the text removes the line. Corrected lines are marked "edited" and the summary uses the corrected text.
+- Search looks inside every meeting: titles, attendees, agenda, notes, transcript lines and summaries. Results show where the match is and a highlighted excerpt.
+- "Export summary and transcript" saves one Markdown or text file with the summary, agenda, notes and full transcript.
+
+## Weeks
+- Weeks start on Monday by default (Settings > You and your tasks > Week starts on). Weekly progress, this week's action items and the calendar follow the setting.
+
+## Reliability
+- Delayed notes and summaries stay attached to the correct meeting when switching views. Only one MeetNotes process can write to local data at a time.
+- Deleting a recovered meeting also removes its damaged recovery copy. Clearing an uncertain task due date removes its old label.
+- API addresses retain query parameters, including Azure API-version parameters. Windows builds use an included ICO icon.
+- Meetings, tasks and settings keep the previous version on every save and recover it if a file is damaged.
+- Speech recognition restarts if it stops responding. Ending a meeting waits at most 90 seconds for queued speech. Transcription backlog is capped on slow computers.
+
+# MeetNotes v1.4.0
+
+## AI summary connections
+
+- Choose the AI that writes the summary in Settings: Claude with an Anthropic API key, Claude Code on this computer (Claude subscription, no key), Codex CLI on this computer (ChatGPT sign-in, no key), or OpenAI, Azure OpenAI, a company gateway or a local model through an OpenAI-compatible API.
+- "Copy prompt for any AI" and "Paste AI reply" on the Summary tab work with any tool, such as Microsoft Copilot, ChatGPT, Claude.ai or Gemini.
+- API calls use the Windows certificate store and proxy, so they work behind corporate SSL inspection.
+
+## Easier Outlook calendar
+
+- "Use Outlook on this computer" reads the calendar from classic Outlook for Windows. No sign-in, app registration or administrator approval. Read-only.
+- The Microsoft sign-in and published calendar link remain available under other options.
+
+## Speech recognition
+
+- Model downloads use Electron's network stack and work behind corporate SSL inspection. Download errors now show the address and reason.
+- The speech model loads in the background at startup and is warmed up, so Start is immediate.
+- Full-precision encoder with a quantized decoder for better accuracy.
+- Segments start 0.3 seconds before speech, adapt to background noise, cut long speech at the quietest point and boost quiet audio.
+- Repeated-phrase loops and common filler hallucinations are removed.
+- The microphone reconnects after a headset or Bluetooth change, failed segments are retried once, and a backlog warning appears when transcription falls behind.
+
+## Installer
+
+- Windows installer lets you choose the install folder and adds desktop and Start menu shortcuts.
+- New app icon.
+- `build-installer.bat` builds the installer locally in one step.
+
 # MeetNotes v1.3.0
 
 ## New features

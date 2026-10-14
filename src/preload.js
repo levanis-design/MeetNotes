@@ -13,6 +13,8 @@ contextBridge.exposeInMainWorld('api', {
   getMeeting: (id) => invoke('meetings:get', id),
   updateMeeting: (id, patch) => invoke('meetings:update', id, patch),
   addNote: (id, note) => invoke('meetings:addNote', id, note),
+  editTranscript: (id, change) => invoke('meetings:editTranscript', id, change),
+  searchMeetings: (query) => invoke('meetings:search', query),
   removeMeeting: (id) => invoke('meetings:remove', id),
   wipeAll: () => invoke('data:wipe'),
 
@@ -21,11 +23,14 @@ contextBridge.exposeInMainWorld('api', {
   onModelStatus: (cb) => ipcRenderer.on('model:status', (e, msg) => cb(msg)),
 
   generate: (id, instruction) => invoke('ai:generate', { id, instruction }),
+  aiPrompt: (id, instruction) => invoke('ai:prompt', { id, instruction }),
+  aiImport: (id) => invoke('ai:import', { id }),
   renderHtml: (id) => invoke('render:html', id),
   renderMarkdown: (id) => invoke('render:markdown', id),
   exportMarkdown: (id) => invoke('export:markdown', id),
   exportPdf: (id) => invoke('export:pdf', id),
   exportTranscript: (id) => invoke('export:transcript', id),
+  exportFull: (id) => invoke('export:full', id),
 
   openExternal: (url) => invoke('shell:open', url),
 
@@ -49,6 +54,8 @@ contextBridge.exposeInMainWorld('api', {
   outlookDisconnect: () => invoke('outlook:disconnect'),
   onOutlookCode: (cb) => ipcRenderer.on('outlook:code', (e, info) => cb(info)),
   testIcs: () => invoke('ics:test'),
+  outlookDesktopConnect: () => invoke('outlookDesktop:connect'),
+  outlookDesktopDisconnect: () => invoke('outlookDesktop:disconnect'),
 
   // Floating widget and window options
   miniUpdate: (state) => ipcRenderer.send('mini:update', state),

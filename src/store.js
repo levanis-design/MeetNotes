@@ -4,6 +4,8 @@ const fs = require('fs');
 const path = require('path');
 const { isCorner, isSize } = require('./mini-layout');
 const { normalizeIcsUrl } = require('./links');
+const { writeAtomic, readJson, removeWithBackup } = require('./fsutil');
+const { PROVIDERS } = require('./providers');
 
 const ID_PATTERN = /^m_\d+$/;
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -16,10 +18,26 @@ function snippet(text, n) {
 }
 const UPDATABLE = ['title', 'attendees', 'agendaPre', 'status', 'startedAt', 'endedAt', 'elapsedSec', 'notes', 'calendarEventId'];
 
-function writeAtomic(file, data) {
-  const tmp = file + '.tmp';
-  fs.writeFileSync(tmp, data);
-  fs.renameSync(tmp, file);
+
+// Every string inside a summary, so search covers decisions, action items and the follow-up agenda.
+function summaryTexts(summary) {
+  const out = [];
+  const walk = (v) => {
+    if (typeof v === 'string') { if (v && !TBC.test(v)) out.push(v); }
+    else if (Array.isArray(v)) v.forEach(walk);
+    else if (v && typeof v === 'object') Object.values(v).forEach(walk);
+  };
+  walk(summary);
+  return out;
+}
+
+// A short excerpt of text centred on the first match.
+function around(text, word, n) {
+  const t = String(text || '').replace(/\s+/g, ' ').trim();
+  const i = t.toLowerCase().indexOf(word);
+  if (t.length <= n || i < 0) return snippet(t, n);
+  const start = Math.max(0, Math.min(i - Math.floor(n / 3), t.length - n));
+  return (start > 0 ? '…' : '') + t.slice(start, start + n).trim() + (start + n < t.length ? '…' : '');
 }
 
 function createStore(baseDir, cipher) {
@@ -38,17 +56,24 @@ function createStore(baseDir, cipher) {
     autoMini: true,
     mainAlwaysOnTop: false,
     myName: '',
+    weekStart: 'monday', // 'monday' or 'sunday'
     autoTasks: true,
     outlookClientId: '',
     outlookTenant: 'common',
     outlookTokenEnc: null,
     outlookAccount: '',
     icsUrlEnc: null,
+    outlookDesktop: false,   // read the calendar from Outlook on this computer (no sign-in)
+    aiProvider: 'anthropic', // see providers.js
+    openaiKeyEnc: null,
+    openaiBaseUrl: 'https://api.openai.com/v1',
+    openaiModel: 'gpt-5',
+    cliPath: '',             // optional full path to the claude or codex command
   };
 
   function readSettings() {
     try {
-      return { ...defaults, ...JSON.parse(fs.readFileSync(settingsFile, 'utf8')) };
+      return { ...defaults, ...readJson(settingsFile) };
     } catch {
       return { ...defaults };
     }
@@ -75,12 +100,19 @@ function createStore(baseDir, cipher) {
       autoMini: s.autoMini,
       mainAlwaysOnTop: s.mainAlwaysOnTop,
       myName: s.myName,
+      weekStart: s.weekStart === 'sunday' ? 'sunday' : 'monday',
       autoTasks: s.autoTasks,
       outlookClientId: s.outlookClientId,
       outlookTenant: s.outlookTenant,
       hasOutlook: Boolean(s.outlookTokenEnc),
       outlookAccount: s.outlookAccount,
       hasIcs: Boolean(s.icsUrlEnc),
+      outlookDesktop: Boolean(s.outlookDesktop),
+      aiProvider: PROVIDERS.includes(s.aiProvider) ? s.aiProvider : 'anthropic',
+      hasOpenaiKey: Boolean(s.openaiKeyEnc),
+      openaiBaseUrl: s.openaiBaseUrl,
+      openaiModel: s.openaiModel,
+      cliPath: s.cliPath,
     };
   }
 
@@ -99,6 +131,21 @@ function createStore(baseDir, cipher) {
       const v = patch.outlookTenant.trim() || 'common';
       if (!TENANT.test(v)) throw new Error('The Directory (tenant) value should be a tenant ID, a domain name, or "common".');
     }
+    if (typeof patch.aiProvider === 'string' && !PROVIDERS.includes(patch.aiProvider)) throw new Error('Unknown AI connection.');
+    if (typeof patch.openaiBaseUrl === 'string' && patch.openaiBaseUrl.trim() && !/^https?:\/\/[^\s]+$/i.test(patch.openaiBaseUrl.trim())) {
+      throw new Error('The API address should start with https:// (or http://localhost for a local model).');
+    }
+    if (typeof patch.cliPath === 'string' && /[&|<>^%"\r\n]/.test(patch.cliPath)) {
+      throw new Error('The command path contains characters that are not allowed. Enter a plain path such as C:\\Users\\you\\AppData\\Roaming\\npm\\claude.cmd');
+    }
+    if (typeof patch.aiProvider === 'string') s.aiProvider = patch.aiProvider;
+    if (typeof patch.openaiBaseUrl === 'string') s.openaiBaseUrl = patch.openaiBaseUrl.trim() || defaults.openaiBaseUrl;
+    if (typeof patch.openaiModel === 'string' && patch.openaiModel.trim()) s.openaiModel = patch.openaiModel.trim().slice(0, 120);
+    if (typeof patch.cliPath === 'string') s.cliPath = patch.cliPath.trim().slice(0, 400);
+    if (typeof patch.openaiKey === 'string') {
+      s.openaiKeyEnc = patch.openaiKey.trim() ? cipher.encrypt(patch.openaiKey.trim()) : null;
+    }
+    if (typeof patch.outlookDesktop === 'boolean') s.outlookDesktop = patch.outlookDesktop;
     if (typeof patch.model === 'string' && patch.model.trim()) s.model = patch.model.trim();
     if (typeof patch.whisperModel === 'string' && patch.whisperModel.trim()) s.whisperModel = patch.whisperModel.trim();
     if (typeof patch.apiKey === 'string') {
@@ -113,6 +160,7 @@ function createStore(baseDir, cipher) {
     if (typeof patch.autoMini === 'boolean') s.autoMini = patch.autoMini;
     if (typeof patch.mainAlwaysOnTop === 'boolean') s.mainAlwaysOnTop = patch.mainAlwaysOnTop;
     if (typeof patch.myName === 'string') s.myName = patch.myName.trim().slice(0, 80);
+    if (patch.weekStart === 'monday' || patch.weekStart === 'sunday') s.weekStart = patch.weekStart;
     if (typeof patch.autoTasks === 'boolean') s.autoTasks = patch.autoTasks;
     // Changing the app registration or directory makes the saved Outlook sign-in invalid.
     if (typeof patch.outlookClientId === 'string') {
@@ -133,6 +181,25 @@ function createStore(baseDir, cipher) {
   function getApiKey() {
     const s = readSettings();
     return s.apiKeyEnc ? cipher.decrypt(s.apiKeyEnc) : null;
+  }
+
+  function getOpenaiKey() {
+    const s = readSettings();
+    return s.openaiKeyEnc ? cipher.decrypt(s.openaiKeyEnc) : null;
+  }
+
+  // Everything the selected AI connection needs, including decrypted keys. Main process only.
+  function getAiConfig() {
+    const s = getSettings();
+    return {
+      provider: s.aiProvider,
+      anthropicKey: getApiKey(),
+      model: s.model,
+      openaiKey: getOpenaiKey(),
+      openaiBaseUrl: s.openaiBaseUrl,
+      openaiModel: s.openaiModel,
+      cliPath: s.cliPath,
+    };
   }
 
   function getOutlookRefresh() {
@@ -157,7 +224,7 @@ function createStore(baseDir, cipher) {
   }
 
   function get(id) {
-    return JSON.parse(fs.readFileSync(fileFor(id), 'utf8'));
+    return readJson(fileFor(id));
   }
 
   function write(meeting) {
@@ -205,7 +272,7 @@ function createStore(baseDir, cipher) {
     for (const f of fs.readdirSync(meetingsDir)) {
       if (!f.endsWith('.json')) continue;
       try {
-        const m = JSON.parse(fs.readFileSync(path.join(meetingsDir, f), 'utf8'));
+        const m = readJson(path.join(meetingsDir, f));
         out.push({
           id: m.id,
           title: m.title,
@@ -244,6 +311,58 @@ function createStore(baseDir, cipher) {
     return item;
   }
 
+  // Corrects or removes one transcript line. The line is found by its time, speaker and current text,
+  // because new lines can arrive and shift positions while a live meeting is being edited.
+  function editTranscript(id, { t, source, text, newText } = {}) {
+    const m = get(id);
+    const i = m.transcript.findIndex((x) => x.t === t && x.source === source && x.text === text);
+    if (i < 0) throw new Error('That transcript line has changed. Reopen the meeting and try again.');
+    const value = String(newText || '').replace(/\s+/g, ' ').trim();
+    if (!value) {
+      m.transcript.splice(i, 1);
+      write(m);
+      return null;
+    }
+    const item = { ...m.transcript[i], text: value.slice(0, 5000), edited: true };
+    m.transcript[i] = item;
+    write(m);
+    return item;
+  }
+
+  // Finds meetings whose title, attendees, agenda, notes, transcript or summary contain every word of the query.
+  function search(query, limit = 50) {
+    const words = String(query || '').toLowerCase().split(/\s+/).filter(Boolean).slice(0, 8);
+    if (!words.length) return [];
+    const out = [];
+    for (const f of fs.readdirSync(meetingsDir)) {
+      if (!f.endsWith('.json')) continue;
+      let m;
+      try { m = readJson(path.join(meetingsDir, f)); } catch { continue; }
+      const fields = [
+        { where: 'Title', text: m.title },
+        { where: 'Attendees', text: m.attendees },
+        { where: 'Agenda', text: m.agendaPre },
+        ...(m.notes || []).map((n) => ({ where: 'Note', t: n.t, text: n.text })),
+        ...(m.transcript || []).map((x) => ({ where: x.source === 'you' ? 'You' : 'Others', t: x.t, text: x.text })),
+        ...summaryTexts(m.summary).map((text) => ({ where: 'Summary', text })),
+      ].filter((x) => x.text);
+      const all = fields.map((x) => String(x.text).toLowerCase()).join('\n');
+      if (!words.every((w) => all.includes(w))) continue;
+      const hits = fields.filter((x) => words.some((w) => String(x.text).toLowerCase().includes(w)));
+      const best = hits.find((x) => words.every((w) => String(x.text).toLowerCase().includes(w))) || hits[0];
+      out.push({
+        id: m.id,
+        title: m.title,
+        date: m.startedAt || m.createdAt,
+        hits: hits.length,
+        where: best.where,
+        t: typeof best.t === 'number' ? best.t : null,
+        snippet: around(best.text, words[0], 140),
+      });
+    }
+    return out.sort((a, b) => (a.date < b.date ? 1 : -1)).slice(0, limit);
+  }
+
   function addNote(id, note) {
     const m = get(id);
     const item = { t: typeof note.t === 'number' ? note.t : null, text: String(note.text || '').trim() };
@@ -261,7 +380,7 @@ function createStore(baseDir, cipher) {
   }
 
   function remove(id) {
-    fs.rmSync(fileFor(id), { force: true });
+    removeWithBackup(fileFor(id));
   }
 
   function wipeAll() {
@@ -270,8 +389,8 @@ function createStore(baseDir, cipher) {
   }
 
   return {
-    getSettings, setSettings, getApiKey, getOutlookRefresh, setOutlookRefresh, getIcsUrl, findByCalendarEvent,
-    create, list, get, update, appendTranscript, addNote, setSummary, remove, wipeAll,
+    getSettings, setSettings, getApiKey, getOpenaiKey, getAiConfig, getOutlookRefresh, setOutlookRefresh, getIcsUrl, findByCalendarEvent,
+    create, list, get, update, appendTranscript, editTranscript, search, addNote, setSummary, remove, wipeAll,
   };
 }
 

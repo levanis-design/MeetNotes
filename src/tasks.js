@@ -2,6 +2,7 @@
 // Personal task list. Tasks are added by hand or imported from a meeting's action items.
 const fs = require('fs');
 const path = require('path');
+const { writeAtomic, readJson } = require('./fsutil');
 
 const TBC = /^data to be confirmed$/i;
 
@@ -38,11 +39,6 @@ function isMine(task, myName) {
   return tokens.some((t) => new RegExp('\\b' + esc(t) + '\\b').test(o));
 }
 
-function writeAtomic(file, data) {
-  const tmp = file + '.tmp';
-  fs.writeFileSync(tmp, data);
-  fs.renameSync(tmp, file);
-}
 
 const norm = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
 
@@ -52,7 +48,7 @@ function createTaskStore(baseDir) {
 
   function read() {
     try {
-      const a = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const a = readJson(file);
       return Array.isArray(a) ? a : [];
     } catch {
       return [];
@@ -105,7 +101,7 @@ function createTaskStore(baseDir) {
     if ('due' in patch) {
       const v = String(patch.due || '').trim();
       t.due = isIsoDate(v) ? v : null;
-      if (t.due) t.dueText = '';
+      t.dueText = !t.due && v && !TBC.test(v) ? v.slice(0, 80) : '';
       edited = true;
     }
     if ('owner' in patch) { t.owner = cleanOwner(patch.owner); edited = true; }

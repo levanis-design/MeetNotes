@@ -6,13 +6,14 @@ const icsCal = require('./ics');
 
 const CAL_TTL_MS = 5 * 60 * 1000;
 
-function createServices({ store, tasks, outlook, fetchIcs = icsCal.fetchEvents, now = () => new Date() }) {
+function createServices({ store, tasks, outlook, outlookDesktop = null, fetchIcs = icsCal.fetchEvents, now = () => new Date() }) {
   const eventCache = new Map();  // range key -> { at, events }
   const eventsById = new Map();  // id -> event, so the window can refer to an event by id only
   let generation = 0;
 
   function calendarSource() {
     if (outlook && outlook.connected()) return 'outlook';
+    if (outlookDesktop && outlookDesktop.enabled()) return 'outlook-desktop';
     if (store.getIcsUrl()) return 'ics';
     return null;
   }
@@ -33,7 +34,9 @@ function createServices({ store, tasks, outlook, fetchIcs = icsCal.fetchEvents, 
     try {
       const events = source === 'outlook'
         ? await outlook.events(from, to)
-        : await fetchIcs(store.getIcsUrl(), from, to);
+        : source === 'outlook-desktop'
+          ? await outlookDesktop.events(from, to)
+          : await fetchIcs(store.getIcsUrl(), from, to);
       if (requestGeneration !== generation) return { events: [], source: calendarSource() };
       eventCache.set(key, { at: now().getTime(), events });
       for (const e of events) eventsById.set(e.id, e);
@@ -58,11 +61,13 @@ function createServices({ store, tasks, outlook, fetchIcs = icsCal.fetchEvents, 
 
   async function dashboard(opts) {
     const n = now();
-    const weekStart = new Date(n.getFullYear(), n.getMonth(), n.getDate() - n.getDay());
+    const settings = store.getSettings();
+    const weekStartsOn = settings.weekStart === 'sunday' ? 0 : 1;
+    const back = (n.getDay() - weekStartsOn + 7) % 7;
+    const weekStart = new Date(n.getFullYear(), n.getMonth(), n.getDate() - back);
     const to = new Date(n.getFullYear(), n.getMonth(), n.getDate() + 14);
     const cal = await getEvents(weekStart, to, Boolean(opts && opts.force));
-    const settings = store.getSettings();
-    const data = buildDashboard({ meetings: store.list(), tasks: tasks.list(), events: cal.events, now: n, myName: settings.myName });
+    const data = buildDashboard({ meetings: store.list(), tasks: tasks.list(), events: cal.events, now: n, myName: settings.myName, weekStartsOn });
     data.calendar = { source: cal.source, error: cal.error || null, account: settings.outlookAccount || '' };
     return data;
   }

@@ -6,3 +6,6 @@ dist/
 !.env.example
 .test-data/
 tools/publish-local.cjs
+*.bak
+*.tmp
+*.damaged

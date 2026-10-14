@@ -9,8 +9,11 @@ async function startCapture({ getElapsed, onSegment, onWarning, onLevel }) {
   const segmenters = {};
   const nodes = [];
   let paused = false;
+  let stopped = false;
+  const MIC_CONSTRAINTS = { audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } };
 
   async function cleanup() {
+    stopped = true;
     paused = true;
     streams.forEach((s) => s.getTracks().forEach((t) => t.stop()));
     nodes.forEach((n) => {
@@ -36,6 +39,33 @@ async function startCapture({ getElapsed, onSegment, onWarning, onLevel }) {
       for (const s of segs) onSegment({ source, t: s.t, samples: s.samples });
     };
     nodes.push(node, src, mute);
+    stream.getAudioTracks().forEach((track) => {
+      track.onended = () => onTrackEnded(source);
+    });
+  }
+
+  // A headset unplugged or a Bluetooth device switching ends the track silently.
+  // Reconnect the microphone to the current default device instead of recording nothing.
+  async function onTrackEnded(source) {
+    if (stopped) return;
+    const seg = segmenters[source] && segmenters[source].flush();
+    if (seg) onSegment({ source, t: seg.t, samples: seg.samples });
+    if (source !== 'you') {
+      onWarning('System audio stopped. Other participants are no longer transcribed. Stop and start the meeting to reconnect.');
+      return;
+    }
+    for (let attempt = 0; attempt < 5 && !stopped; attempt++) {
+      await new Promise((r) => setTimeout(r, 1000));
+      try {
+        const mic = await navigator.mediaDevices.getUserMedia(MIC_CONSTRAINTS);
+        if (stopped) { mic.getTracks().forEach((t) => t.stop()); return; }
+        streams.push(mic);
+        attach(mic, 'you');
+        onWarning('Microphone changed. Recording continues with the current default microphone.');
+        return;
+      } catch (_) { /* try again */ }
+    }
+    if (!stopped) onWarning('Microphone disconnected. Your voice is not being transcribed. Check the microphone, then stop and start the meeting.');
   }
 
   function flushAll() {
@@ -49,9 +79,7 @@ async function startCapture({ getElapsed, onSegment, onWarning, onLevel }) {
   await ctx.audioWorklet.addModule('pcm-worklet.js');
   await ctx.resume();
   // Microphone
-  const mic = await navigator.mediaDevices.getUserMedia({
-    audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 },
-  });
+  const mic = await navigator.mediaDevices.getUserMedia(MIC_CONSTRAINTS);
   streams.push(mic);
   attach(mic, 'you');
 

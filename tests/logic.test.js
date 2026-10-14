@@ -180,7 +180,7 @@ test('segmenter: skips silence, cuts at pauses and at max length, drops noise-on
   assert.strictEqual(out.length, 0, 'no cut while speaking below max length');
   for (let i = 0; i < 8; i++) out.push(...seg.push(block(0), 9 + i * 0.1)); // 0.8 s pause
   assert.strictEqual(out.length, 1);
-  assert.ok(Math.abs(out[0].t - 2) < 1e-9);
+  assert.ok(Math.abs(out[0].t - 1.7) < 1e-9, 'segment starts 0.3 s before speech (pre-roll)');
   assert.ok(out[0].samples.length >= 7 * sr);
 
   const long = new Segmenter({ sampleRate: sr });
@@ -192,4 +192,34 @@ test('segmenter: skips silence, cuts at pauses and at max length, drops noise-on
   noise.push(block(0.1), 0); // 0.1 s of speech only
   for (let i = 0; i < 80; i++) noise.push(block(0), 0.1 + i * 0.1);
   assert.strictEqual(noise.flush(), null, 'too little speech is discarded');
+});
+
+test('segmenter: forced cut lands on the quietest point and keeps the remainder', () => {
+  const sr = 16000;
+  const block = (v) => new Float32Array(1600).fill(v);
+  const seg = new Segmenter({ sampleRate: sr });
+  const out = [];
+  for (let i = 0; i < 250; i++) {
+    const v = i === 240 ? 0.02 : 0.1; // a softer dip 1 s before the max length
+    out.push(...seg.push(block(v), i * 0.1));
+  }
+  assert.strictEqual(out.length, 1);
+  assert.strictEqual(out[0].samples.length, 241 * 1600, 'cut right after the dip');
+  assert.strictEqual(seg.length, 9 * 1600, 'remaining audio carried into the next segment');
+  assert.ok(Math.abs(seg.startT - 24.1) < 1e-9);
+});
+
+test('segmenter: adapts to background noise so quiet speech is still detected', () => {
+  const sr = 16000;
+  const block = (v) => new Float32Array(1600).fill(v);
+  const quiet = new Segmenter({ sampleRate: sr });
+  const out = [];
+  for (let i = 0; i < 20; i++) out.push(...quiet.push(block(0.001), i * 0.1)); // low noise floor
+  for (let i = 0; i < 70; i++) out.push(...quiet.push(block(0.006), 2 + i * 0.1)); // soft voice
+  for (let i = 0; i < 8; i++) out.push(...quiet.push(block(0.001), 9 + i * 0.1));
+  assert.strictEqual(out.length, 1, 'soft speech below the old fixed 0.01 threshold is kept');
+
+  const noisy = new Segmenter({ sampleRate: sr });
+  for (let i = 0; i < 100; i++) noisy.push(block(0.006), i * 0.1); // constant hum
+  assert.ok(noisy.threshold() > 0.006, 'steady hum raises the threshold above itself');
 });

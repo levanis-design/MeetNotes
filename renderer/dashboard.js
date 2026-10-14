@@ -213,6 +213,10 @@
       chip.classList.add('ok');
       chip.textContent = c.account ? `Outlook · ${c.account}` : 'Outlook connected';
       chip.title = 'Outlook calendar (read-only)';
+    } else if (c.source === 'outlook-desktop') {
+      chip.classList.add('ok');
+      chip.textContent = 'Outlook on this computer';
+      chip.title = 'Calendar read from Outlook on this computer (read-only)';
     } else if (c.source === 'ics') {
       chip.classList.add('ok');
       chip.textContent = 'Calendar link';
@@ -245,9 +249,22 @@
   }
 
   // ---------- calendar ----------
+  const DOW = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+  function weekStartsOn() {
+    return S.data && S.data.weekStartsOn === 0 ? 0 : 1;
+  }
+  function renderWeekdays() {
+    const row = $('calWeek');
+    if (!row) return;
+    const ws = weekStartsOn();
+    row.textContent = '';
+    for (let i = 0; i < 7; i++) row.append(el('span', '', DOW[(ws + i) % 7]));
+  }
+
   function gridRange() {
     const first = S.month;
-    const start = new Date(first.getFullYear(), first.getMonth(), 1 - first.getDay());
+    const lead = (first.getDay() - weekStartsOn() + 7) % 7;
+    const start = new Date(first.getFullYear(), first.getMonth(), 1 - lead);
     const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 42);
     return { start, end };
   }
@@ -265,6 +282,7 @@
   }
 
   function renderCalendar() {
+    renderWeekdays();
     $('calLabel').textContent = S.month.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
     const has = new Set();
     for (const ev of S.monthEvents) eventDays(ev).forEach((k) => has.add(k));
