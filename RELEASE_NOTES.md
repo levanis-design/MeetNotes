@@ -1,4 +1,4 @@
-# Unreleased
+# MeetNotes v1.4.0
 
 ## Transcription
 - Silence and background noise are filtered out before speech recognition (Silero voice detection), which stops made-up lines such as "Thank you for watching". The filter model downloads once with the speech model; if it cannot load, transcription works as before. Settings > Speech can turn it off.
@@ -25,8 +25,6 @@
 - API addresses retain query parameters, including Azure API-version parameters. Windows builds use an included ICO icon.
 - Meetings, tasks and settings keep the previous version on every save and recover it if a file is damaged.
 - Speech recognition restarts if it stops responding. Ending a meeting waits at most 90 seconds for queued speech. Transcription backlog is capped on slow computers.
-
-# MeetNotes v1.4.0
 
 ## AI summary connections
 
