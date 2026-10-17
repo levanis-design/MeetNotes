@@ -10,6 +10,9 @@ app.setPath('userData', dataDir);
 app.on('browser-window-created', (_, win) => win.hide());
 dialog.showSaveDialog = async (_, options) => ({ filePath: path.join(dataDir, options.defaultPath) });
 const errors = [];
+// UI checks mock recognition below. Real model loading/inference has its own smoke tests;
+// do not leave an unrelated native model worker loading while this process exits.
+process.env.MEETNOTES_SKIP_MODEL_PRELOAD = '1';
 app.on('web-contents-created', (_, contents) => contents.on('console-message', (event) => {
   if (event.level === 'error') errors.push(event.message);
 }));

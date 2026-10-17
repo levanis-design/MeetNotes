@@ -9,6 +9,7 @@ Reviewed the `meetily-ideas` update: silence filtering, summary templates, long-
 - Report failures when starting or appending saved audio. Stop appending after a failed chunk because later WebM chunks depend on it.
 - Show the correct default audio-retention disclosure before settings finish loading. Deletion confirmation explicitly includes saved audio.
 - Keep recovery warnings attached to their meeting when navigating.
+- Isolate UI smoke tests from background model preloading after a GitHub runner crashed during shutdown after printing PASS. Real model loading and inference remain separately tested.
 - Clarify the limits of long-meeting summaries and prompt-injection instructions in the release notes.
 
 ## Validation

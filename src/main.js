@@ -628,9 +628,11 @@ app.whenReady().then(() => {
   registerIpc();
   createWindow();
   // Load the speech model in the background, so Start is instant when a meeting begins.
-  setTimeout(() => {
-    if (!transcriber || transcriber.state !== 'ready') getTranscriber().ensureReady().catch(() => { /* reported via model:status; retried on Start */ });
-  }, 3000);
+  if (process.env.MEETNOTES_SKIP_MODEL_PRELOAD !== '1') {
+    setTimeout(() => {
+      if (!transcriber || transcriber.state !== 'ready') getTranscriber().ensureReady().catch(() => { /* reported via model:status; retried on Start */ });
+    }, 3000);
+  }
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
