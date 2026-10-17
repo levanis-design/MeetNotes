@@ -73,3 +73,27 @@ test('transcriber: disposal rejects outstanding model readiness and transcriptio
   await assert.rejects(ready, /Transcriber stopped/);
   await assert.rejects(text, /Transcriber stopped/);
 });
+
+test('saved audio: failed initialization warns; a failed chunk stops subsequent writes', async () => {
+  for (const failBegin of [true, false]) {
+    let recorder;
+    class MediaRecorder {
+      static isTypeSupported() { return true; }
+      constructor() { recorder = this; this.state = 'inactive'; }
+      start() { this.state = 'recording'; }
+      stop() { this.state = 'inactive'; this.onstop(); }
+    }
+    const context = { window: {}, MediaRecorder, MediaStream: class {} };
+    vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../renderer/capture.js'), 'utf8'), context);
+    const warnings = [];
+    let appends = 0;
+    const saved = context.createRecorder({ getAudioTracks: () => [] }, 'you', 0, {
+      async begin() { if (failBegin) throw new Error('disk full'); return 'file.webm'; },
+      async append() { appends++; throw new Error('disk full'); },
+    }, (message) => warnings.push(message));
+    for (let i = 0; i < 2; i++) recorder.ondataavailable({ data: { size: 1, async arrayBuffer() { return new ArrayBuffer(1); } } });
+    await saved.stop();
+    assert.equal(warnings.length, 1);
+    assert.equal(appends, failBegin ? 0 : 1);
+  }
+});

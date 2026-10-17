@@ -111,7 +111,7 @@ class Transcriber {
       if (!p) return;
       this.pending.delete(msg.id);
       if (!this.pending.size) this.disarmWatchdog();
-      if (msg.type === 'result') p.resolve(msg.text);
+      if (msg.type === 'result') p.resolve(p.full ? { text: msg.text, offsetSec: msg.offsetSec || 0 } : msg.text);
       else p.reject(new Error(msg.message));
     }
   }
@@ -135,14 +135,16 @@ class Transcriber {
     return new Promise((resolve, reject) => this.readyWaiters.push({ resolve, reject }));
   }
 
-  transcribe(samples) {
+  // Resolves with the text. With { full: true } it resolves with { text, offsetSec }, where offsetSec is
+  // how far into the segment the speech started (the silence filter trims what comes before it).
+  transcribe(samples, { vad = true, full = false } = {}) {
     this.start();
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
       if (!this.pending.size) this.progress();
-      this.pending.set(id, { resolve, reject });
+      this.pending.set(id, { resolve, reject, full });
       this.armWatchdog();
-      this.worker.postMessage({ type: 'transcribe', id, samples: toFloat32(samples) });
+      this.worker.postMessage({ type: 'transcribe', id, samples: toFloat32(samples), vad });
     });
   }
 

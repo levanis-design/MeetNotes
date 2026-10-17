@@ -1,4 +1,15 @@
-# Unreleased
+# MeetNotes v1.4.0
+
+## Transcription
+- Silence and background noise are filtered out before speech recognition (Silero voice detection), which stops made-up lines such as "Thank you for watching". The filter model downloads once with the speech model; if it cannot load, transcription works as before. Settings > Speech can turn it off.
+- Meeting audio is saved compressed every 30 seconds (on by default, Settings > Speech). After a crash, "Recover missing speech" under the transcript transcribes only the parts that have no lines yet. "Transcribe again" redoes the whole meeting, for example with a more accurate speech model. "Delete audio" removes the audio and keeps the transcript.
+- "Import recording" transcribes an audio or video file (MP3, WAV, M4A, MP4, WebM and others). Lines from a recording are labelled "Recording".
+
+## Summaries
+- Summary templates: Standard, Daily standup, Project status, Client or vendor call, One-to-one and Retrospective. Each adds sections for that kind of meeting, and you can add your own as JSON files (Settings > AI summary > Open templates folder). Pick the template on each meeting's Summary tab.
+- Long transcripts are condensed in parts and then summarized. Local models (Ollama, LM Studio) get smaller parts. Exceptionally large meetings or notes can still exceed the model's request limit.
+- The summary prompt tells the AI to treat instructions spoken in the meeting as content rather than commands. This reduces prompt-injection risk; it does not guarantee model behavior.
+- Review fixes prevent new meetings, data deletion and app updates during re-transcription, preserve the end of oversized transcript lines, and report audio-saving failures.
 
 ## Notes and transcripts
 - Correct a transcript line by clicking it. Clearing the text removes the line. Corrected lines are marked "edited" and the summary uses the corrected text.
@@ -14,8 +25,6 @@
 - API addresses retain query parameters, including Azure API-version parameters. Windows builds use an included ICO icon.
 - Meetings, tasks and settings keep the previous version on every save and recover it if a file is damaged.
 - Speech recognition restarts if it stops responding. Ending a meeting waits at most 90 seconds for queued speech. Transcription backlog is capped on slow computers.
-
-# MeetNotes v1.4.0
 
 ## AI summary connections
 

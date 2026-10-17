@@ -53,6 +53,13 @@ function renderMarkdown(m, { withTranscript = false } = {}) {
   } else {
     out.push('## Executive summary', '', s.executive_summary, '');
 
+    for (const sec of s.template_sections || []) {
+      out.push(`## ${sec.title}`, '');
+      if (sec.items.length) for (const x of sec.items) out.push(`- ${x}`);
+      else out.push('- Nothing recorded');
+      out.push('');
+    }
+
     out.push('## Decisions', '');
     if (s.decisions.length) {
       for (const d of s.decisions) out.push(`- ${d.decision}${d.context ? ` (${d.context})` : ''}`);
@@ -118,6 +125,13 @@ function renderHtml(m, { standalone = false } = {}) {
     h.push('<p>Summary not generated yet.</p>');
   } else {
     h.push('<h2>Executive summary</h2>', `<p>${esc(s.executive_summary)}</p>`);
+
+    for (const sec of s.template_sections || []) {
+      h.push(`<h2>${esc(sec.title)}</h2>`);
+      h.push(sec.items.length
+        ? '<ul>' + sec.items.map((x) => `<li>${esc(x)}</li>`).join('') + '</ul>'
+        : '<p class="muted">Nothing recorded</p>');
+    }
 
     h.push('<h2>Decisions</h2>');
     h.push(s.decisions.length

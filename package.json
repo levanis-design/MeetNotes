@@ -8,7 +8,7 @@
   "license": "UNLICENSED",
   "scripts": {
     "start": "electron .",
-    "test": "node --test tests/logic.test.js tests/features.test.js tests/calendar.test.js tests/capture.test.js tests/updates.test.js tests/connectors.test.js tests/reliability.test.js tests/editing.test.js",
+    "test": "node --test tests/logic.test.js tests/features.test.js tests/calendar.test.js tests/capture.test.js tests/updates.test.js tests/connectors.test.js tests/reliability.test.js tests/editing.test.js tests/meetily.test.js",
     "dist": "electron-builder --win"
   },
   "dependencies": {
@@ -33,6 +33,7 @@
     ],
     "asarUnpack": [
       "src/whisper-worker.js",
+      "src/vad.js",
       "node_modules/onnxruntime-node/**",
       "node_modules/sharp/**",
       "node_modules/@img/**"

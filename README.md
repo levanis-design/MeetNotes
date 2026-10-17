@@ -119,7 +119,7 @@ The sign-in token and the calendar link are stored encrypted with Windows secure
 
 ## Privacy
 
-- Audio is never saved. Only recognized text is stored, in `%APPDATA%\meetnotes`.
+- Meeting audio is saved compressed in `%APPDATA%\meetnotes\audio`, next to the recognized text, so a meeting can be transcribed again or recovered after a crash. Turn this off in Settings > Speech, or delete one meeting's audio from under its transcript. Deleting a meeting deletes its audio. Imported recordings are read where they are and are never copied or deleted.
 - Speech recognition runs on your computer.
 - Generating a summary sends that meeting's transcript, notes and agenda text to the AI connection chosen in Settings: Anthropic, OpenAI or your compatible service, or the Claude Code or Codex tool on this computer, which forwards it to its own service. A local model in Ollama or LM Studio keeps it on your computer. Meeting content is sent only when you press Generate or Test AI connection, and with Copy prompt it goes only where you paste it. Check that the tool you choose is approved for meeting content at your organisation. Calendar data is not sent anywhere except through a meeting you create from an event: its title and attendee names then become part of that meeting.
 - Calendar events are read from Microsoft Graph (or your calendar link) and kept in memory only for a few minutes. They are not saved to disk.

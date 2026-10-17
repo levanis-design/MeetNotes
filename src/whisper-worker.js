@@ -2,7 +2,10 @@
 // Runs local Whisper speech recognition in a worker thread so the app stays responsive.
 const { parentPort, workerData } = require('worker_threads');
 
+const { loadSilero, filterSpeech } = require('./vad');
+
 let asr = null;
+let detect = null; // Silero VAD, or null when it could not be loaded (then every segment goes to Whisper)
 
 // Model downloads go through the main process, which uses Electron's network stack.
 // That stack trusts the Windows certificate store and honors the system proxy,
@@ -95,7 +98,7 @@ function normalize(samples) {
 }
 
 async function init() {
-  const { pipeline, env } = await import('@huggingface/transformers');
+  const { pipeline, env, AutoModel, Tensor } = await import('@huggingface/transformers');
   env.cacheDir = workerData.cacheDir;
   env.fetch = bridgeFetch;
   const progress_callback = (p) => parentPort.postMessage({ type: 'status', state: 'loading', progress: p });
@@ -121,6 +124,12 @@ async function init() {
     }
   }
   if (!asr) throw lastErr;
+  // The silence filter is an improvement, not a requirement: without it, transcription works as before.
+  try {
+    detect = await loadSilero({ AutoModel, Tensor });
+  } catch (err) {
+    parentPort.postMessage({ type: 'status', state: 'loading', message: `Silence filter unavailable, transcribing without it (${describe(err)})` });
+  }
   // Warm up once so the first real segment is not slowed by initialization.
   try { await asr(new Float32Array(16000), { chunk_length_s: 30 }); } catch (_) { /* warm-up is optional */ }
   parentPort.postMessage({ type: 'status', state: 'ready' });
@@ -141,10 +150,25 @@ parentPort.on('message', (msg) => {
   try {
     await ready;
     if (initError) throw initError;
-    const out = await asr(normalize(msg.samples), { chunk_length_s: 30 });
+    let samples = msg.samples;
+    let offsetSec = 0;
+    if (detect && msg.vad !== false) {
+      let speech;
+      try {
+        speech = await filterSpeech(detect, samples);
+      } catch (_) {
+        speech = { samples, offsetSec: 0 }; // a filter failure must not lose the segment
+      }
+      if (!speech) {
+        parentPort.postMessage({ type: 'result', id: msg.id, text: '', offsetSec: 0 });
+        return;
+      }
+      ({ samples, offsetSec } = speech);
+    }
+    const out = await asr(normalize(samples), { chunk_length_s: 30 });
     let text = clean(out && out.text);
     if (NOISE_ONLY.test(text)) text = '';
-    parentPort.postMessage({ type: 'result', id: msg.id, text });
+    parentPort.postMessage({ type: 'result', id: msg.id, text, offsetSec });
   } catch (err) {
     parentPort.postMessage({ type: 'error', id: msg.id, message: String(err && err.message ? err.message : err) });
   }

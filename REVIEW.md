@@ -1,53 +1,34 @@
-﻿# MeetNotes release readiness review
+﻿# MeetNotes update review — October 17, 2026
 
-Reviewed on October 13, 2026. Package version: 1.4.0. Source branch: `features-edit-search-export-week`.
+Reviewed the `meetily-ideas` update: silence filtering, summary templates, long-transcript summaries, saved meeting audio, recording import, recovery and re-transcription. Package version remains 1.4.0; publishing a new installer release is separate from uploading the source.
 
-## Result
+## Review fixes
 
-The reviewed source passes the checks below, and the Windows installer builds successfully. This is not a guarantee that the app is free of defects. The account, hardware and installation checks below remain necessary before a public release.
+- Block creating a meeting, deleting meeting data and installing app updates while saved audio is being transcribed. Recheck the selected meeting after loading audio metadata to avoid a navigation race.
+- Preserve the full text of oversized transcript lines instead of silently truncating them, while respecting the per-part request size.
+- Report failures when starting or appending saved audio. Stop appending after a failed chunk because later WebM chunks depend on it.
+- Show the correct default audio-retention disclosure before settings finish loading. Deletion confirmation explicitly includes saved audio.
+- Keep recovery warnings attached to their meeting when navigating.
+- Isolate UI smoke tests from background model preloading after a GitHub runner crashed during shutdown after printing PASS. Real model loading and inference remain separately tested.
+- Clarify the limits of long-meeting summaries and prompt-injection instructions in the release notes.
 
-## CI installation follow-up
+## Validation
 
-The initial uploaded lockfile omitted optional peer dependencies because the local npm user configuration enabled `legacy-peer-deps`. Regenerated the lockfile with normal peer resolution and added a project `.npmrc` setting `legacy-peer-deps=false`. A real `npm ci` now succeeds; all 82 tests and desktop checks pass after the clean install. This fixes the GitHub Actions lockfile mismatch.
+- A real `npm ci` completed successfully.
+- All 106 automated tests passed, including regressions for oversized transcript lines and audio-save failures.
+- Source desktop checks passed. They record a synthetic tone through the real browser MediaRecorder, persist it, decode it, start a saved-audio job and confirm that new meetings and data deletion are blocked until cancellation finishes. No real microphone or account is used.
+- Real Whisper model loading and CPU inference on synthetic silence passed with the updated speech worker.
+- The Windows NSIS installer built, and `tools/verify-release.cjs` verified its version, SHA-512, metadata filename and blockmap.
+- Packaged desktop checks passed: the new modules match reviewed source, and the same audio persistence and cancellation workflow passes. Packaged worker dependencies and CPU inference also passed.
+- Production dependency audit: zero reported vulnerabilities. Full dependency installation reports eight moderate advisories in development/build tooling; no forced dependency downgrade was applied.
+- Source credential-pattern scan found no obvious API keys, GitHub tokens or private keys. Test data, audio used in tests, model caches and installers remain excluded from Git.
 
-## Fixed during this review
+## Remaining live checks and limitations
 
-- Prevented delayed note and summary responses from appearing in a different meeting after navigation; added desktop regressions. Note submission clears immediately to prevent duplicate clicks and reports save failures.
-- Made concurrent meeting navigation keep the most recently requested meeting.
-- Deleted damaged recovery copies when deleting a meeting, and excluded those files from Git.
-- Corrected stale task due-date labels when changing or clearing an uncertain date.
-- Preserved API endpoint query parameters, including Azure API-version parameters. Keyless requests require an exact loopback hostname; Azure headers are selected by hostname.
-- Added a single-instance lock to prevent multiple app processes from writing the same data files.
-- Included a Windows ICO asset to avoid a PNG conversion failure caused by an unrelated ancestor package's module setting on this computer.
-- Added desktop regression checks to both GitHub Actions workflows.
-
-## Verified on this checkout
-
-- `npm test`: 82 tests passed, zero failures.
-- `electron tests/electron-smoke.cjs`: passed, including delayed note/summary navigation regressions, dashboard/tasks, meeting editing, PDF exports, widget and recording lifecycle with simulated capture.
-- `npm run dist -- --publish never`: built the Windows NSIS installer, blockmap and update metadata.
-- `node tools/verify-release.cjs`: verified version, installer SHA-512, metadata filename and blockmap; created the release asset aliases.
-- `electron tests/electron-smoke.cjs --packaged`: passed against packaged source.
-- `node tests/transcription-smoke.cjs`: real model loading and CPU inference passed on synthetic silence.
-- `electron tests/packaged-transcription.cjs`: packaged worker dependencies and CPU inference passed.
-- `npm audit --omit=dev`: zero reported production dependency vulnerabilities.
-- Credential-pattern scan of source found no obvious real API keys, GitHub tokens or private keys. Local data, model cache, dependencies and installers are ignored by Git.
-- `git diff --check`: passed.
-
-The expected Outlook configuration error in the smoke test is intentional: no real Microsoft account was connected. Synthetic silence validates model loading, not recognition accuracy. Tests ran on local Node 24; the configured Node 22 GitHub Actions jobs have not run for these changes.
-
-## Remaining findings and live checks
-
-- Full `npm audit` reports seven moderate entries in the Electron Builder dependency chain, all tracing to `sprintf-js` through build-time proxy logging. The advisory lists no patched version: https://github.com/advisories/GHSA-hp3w-g68c-fv3c. No forced downgrade was applied. The production audit is clean.
-- Test a real microphone and Windows loopback call, including headset changes, pause/resume and minimizing. Check names, numbers and transcript completeness.
-- Test the selected AI connection with an approved meeting and a failed network request. API/CLI behavior is covered with fakes, not a live paid account.
-- Connect the intended Outlook account or desktop Outlook and verify organisational consent, events and Join links.
-- Install on a clean Windows machine without Node.js, then test an actual restart/install upgrade from the previous version.
-- Check widget scaling and positioning on multiple monitors.
-- The installer is unsigned. Code signing and a complete local backup/restore feature remain useful follow-ups.
-
-## GitHub state
-
-The remote head lookup returned only `main` at `d326168`; local HEAD was `3032d7f` before this review. The newer 1.4.0, reliability and editing/search commits are local. Review fixes are uncommitted on the existing feature branch. No push, tag, merge or release publication was performed during this review.
-
-MeetNotes does not publish meeting content to GitHub. GitHub distributes app binaries and update metadata.
+- Test real microphone and Windows loopback capture, pause/resume, headset changes and recording recovery after a real crash. Synthetic tone and silence checks do not establish speech-recognition accuracy or crash recovery on every device.
+- Test the chosen AI provider with an approved real meeting, including a long meeting and a failed request. The summary tests use simulated provider responses.
+- Verify live Outlook access and a real install/upgrade on a clean Windows computer. The installer remains unsigned.
+- Saved audio is enabled by default and kept locally; Settings can disable future recording saves. Deleting a meeting removes its saved audio. Imported files stay in their original location and are not deleted.
+- Recovery skips a segment if it already contains a transcript line from the same source; it cannot establish that every word in that segment was captured. Use full re-transcription if a partially transcribed segment is incomplete.
+- Audio import decodes a whole file in memory. Very long recordings can require substantial memory even when their compressed file is below the 1 GB import limit.
+- Exceptionally large notes or condensed transcripts can still exceed a model's request limit. Prompt instructions reduce injection risk but cannot guarantee AI behavior.
