@@ -56,7 +56,7 @@
     $('pauseBtn').setAttribute('aria-label', paused ? 'Resume' : 'Pause');
     $('title').textContent = (s && s.title) || '';
     const last = s && s.last;
-    $('last').textContent = last ? `${last.source === 'you' ? 'You' : 'Others'}: ${last.text}` : 'Listening...';
+    $('last').textContent = last ? `${last.source === 'you' ? 'You' : last.source === 'mixed' ? 'Recording' : 'Others'}: ${last.text}` : 'Listening...';
     applyClasses();
     tickTimer();
   }

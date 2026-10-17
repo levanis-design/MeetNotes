@@ -1,13 +1,58 @@
 'use strict';
 // Captures microphone ("you") and system audio ("others") as 16 kHz mono and emits speech segments.
-// Audio is never written to disk. Only the recognized text is kept.
+// When saveAudio is given, each stream is also recorded as compressed WebM/Opus and handed over every
+// 30 seconds, so the meeting can be transcribed again later or recovered after a crash.
+// saveAudio: { begin(source, t, mime) -> Promise<name|null>, append(name, ArrayBuffer) -> Promise }
 
-async function startCapture({ getElapsed, onSegment, onWarning, onLevel }) {
+const AUDIO_SLICE_MS = 30000;
+
+// Records one stream. Chunks are written strictly in order, because each depends on the one before.
+function createRecorder(stream, source, t, saveAudio, onWarning) {
+  if (!saveAudio || typeof MediaRecorder === 'undefined') return null;
+  const mime = ['audio/webm;codecs=opus', 'audio/webm'].find((m) => MediaRecorder.isTypeSupported(m));
+  if (!mime) return null;
+  let rec;
+  try {
+    rec = new MediaRecorder(new MediaStream(stream.getAudioTracks()), { mimeType: mime, audioBitsPerSecond: 32000 });
+  } catch (_) {
+    return null;
+  }
+  let chain = Promise.resolve(saveAudio.begin(source, t, mime)).catch(() => null);
+  let warned = false;
+  rec.ondataavailable = (e) => {
+    if (!e.data || !e.data.size) return;
+    const blob = e.data;
+    chain = chain.then(async (name) => {
+      if (!name) return name;
+      try {
+        await saveAudio.append(name, await blob.arrayBuffer());
+      } catch (err) {
+        if (!warned) { warned = true; onWarning('Saving the meeting audio failed. Transcription continues, but this part cannot be transcribed again later.'); }
+      }
+      return name;
+    });
+  };
+  const stopped = new Promise((resolve) => { rec.onstop = resolve; });
+  rec.start(AUDIO_SLICE_MS);
+  return {
+    pause() { if (rec.state === 'recording') rec.pause(); },
+    resume() { if (rec.state === 'paused') rec.resume(); },
+    // Resolves once the last chunk is written.
+    async stop() {
+      if (rec.state !== 'inactive') rec.stop();
+      await stopped;
+      await chain;
+    },
+  };
+}
+
+async function startCapture({ getElapsed, onSegment, onWarning, onLevel, saveAudio }) {
   const ctx = new AudioContext({ sampleRate: 16000 });
 
   const streams = [];
   const segmenters = {};
   const nodes = [];
+  const recorders = [];
   let paused = false;
   let stopped = false;
   const MIC_CONSTRAINTS = { audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } };
@@ -15,6 +60,7 @@ async function startCapture({ getElapsed, onSegment, onWarning, onLevel }) {
   async function cleanup() {
     stopped = true;
     paused = true;
+    await Promise.all(recorders.map((r) => r.stop().catch(() => { /* already reported */ })));
     streams.forEach((s) => s.getTracks().forEach((t) => t.stop()));
     nodes.forEach((n) => {
       if (n.port) n.port.onmessage = null;
@@ -39,6 +85,11 @@ async function startCapture({ getElapsed, onSegment, onWarning, onLevel }) {
       for (const s of segs) onSegment({ source, t: s.t, samples: s.samples });
     };
     nodes.push(node, src, mute);
+    const rec = createRecorder(stream, source, getElapsed(), saveAudio, onWarning);
+    if (rec) {
+      if (paused) rec.pause();
+      recorders.push(rec);
+    }
     stream.getAudioTracks().forEach((track) => {
       track.onended = () => onTrackEnded(source);
     });
@@ -110,6 +161,7 @@ async function startCapture({ getElapsed, onSegment, onWarning, onLevel }) {
     setPaused(value) {
       if (value && !paused) flushAll(); // keep what was said before the pause
       paused = Boolean(value);
+      recorders.forEach((r) => (paused ? r.pause() : r.resume()));
     },
     async stop() {
       flushAll();

@@ -292,3 +292,9 @@ code { font-family: Consolas, monospace; font-size: 12px; }
   .grid2, .dash-side { grid-template-columns: minmax(0, 1fr); }
   .two-col { grid-template-columns: 1fr; }
 }
+
+/* saved audio */
+.audio-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 10px; margin-top: 8px; }
+.audio-bar .audio-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.audio-bar button { font-size: 12px; padding: 4px 10px; }
+#genTemplate { max-width: 200px; }

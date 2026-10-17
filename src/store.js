@@ -16,7 +16,9 @@ function snippet(text, n) {
   const t = String(text || '').replace(/\s+/g, ' ').trim();
   return t.length > n ? t.slice(0, n - 1).trimEnd() + '…' : t;
 }
-const UPDATABLE = ['title', 'attendees', 'agendaPre', 'status', 'startedAt', 'endedAt', 'elapsedSec', 'notes', 'calendarEventId'];
+const UPDATABLE = ['title', 'attendees', 'agendaPre', 'status', 'startedAt', 'endedAt', 'elapsedSec', 'notes', 'calendarEventId', 'template'];
+const SOURCES = new Set(['you', 'others', 'mixed']);
+const TEMPLATE_ID = /^[a-z0-9][a-z0-9-]{0,60}$/;
 
 
 // Every string inside a summary, so search covers decisions, action items and the follow-up agenda.
@@ -38,6 +40,11 @@ function around(text, word, n) {
   if (t.length <= n || i < 0) return snippet(t, n);
   const start = Math.max(0, Math.min(i - Math.floor(n / 3), t.length - n));
   return (start > 0 ? '…' : '') + t.slice(start, start + n).trim() + (start + n < t.length ? '…' : '');
+}
+
+// "mixed" lines come from an imported recording, where the speakers cannot be told apart.
+function speakerLabel(source) {
+  return source === 'you' ? 'You' : source === 'mixed' ? 'Recording' : 'Others';
 }
 
 function createStore(baseDir, cipher) {
@@ -69,6 +76,9 @@ function createStore(baseDir, cipher) {
     openaiBaseUrl: 'https://api.openai.com/v1',
     openaiModel: 'gpt-5',
     cliPath: '',             // optional full path to the claude or codex command
+    vadFilter: true,         // send only speech to Whisper (Silero voice detection)
+    saveAudio: true,         // keep compressed meeting audio on this computer for re-transcribing and recovery
+    defaultTemplate: 'standard',
   };
 
   function readSettings() {
@@ -113,6 +123,9 @@ function createStore(baseDir, cipher) {
       openaiBaseUrl: s.openaiBaseUrl,
       openaiModel: s.openaiModel,
       cliPath: s.cliPath,
+      vadFilter: s.vadFilter !== false,
+      saveAudio: s.saveAudio !== false,
+      defaultTemplate: TEMPLATE_ID.test(String(s.defaultTemplate)) ? s.defaultTemplate : 'standard',
     };
   }
 
@@ -162,6 +175,9 @@ function createStore(baseDir, cipher) {
     if (typeof patch.myName === 'string') s.myName = patch.myName.trim().slice(0, 80);
     if (patch.weekStart === 'monday' || patch.weekStart === 'sunday') s.weekStart = patch.weekStart;
     if (typeof patch.autoTasks === 'boolean') s.autoTasks = patch.autoTasks;
+    if (typeof patch.vadFilter === 'boolean') s.vadFilter = patch.vadFilter;
+    if (typeof patch.saveAudio === 'boolean') s.saveAudio = patch.saveAudio;
+    if (typeof patch.defaultTemplate === 'string' && TEMPLATE_ID.test(patch.defaultTemplate)) s.defaultTemplate = patch.defaultTemplate;
     // Changing the app registration or directory makes the saved Outlook sign-in invalid.
     if (typeof patch.outlookClientId === 'string') {
       const v = patch.outlookClientId.trim();
@@ -232,7 +248,7 @@ function createStore(baseDir, cipher) {
     return meeting;
   }
 
-  function create({ title, attendees, agendaPre, calendarEventId } = {}) {
+  function create({ title, attendees, agendaPre, calendarEventId, template } = {}) {
     let n = Date.now();
     while (fs.existsSync(path.join(meetingsDir, `m_${n}.json`))) n += 1;
     const meeting = {
@@ -250,6 +266,7 @@ function createStore(baseDir, cipher) {
       summary: null,
       generatedAt: null,
       calendarEventId: typeof calendarEventId === 'string' && calendarEventId ? calendarEventId : null,
+      template: typeof template === 'string' && TEMPLATE_ID.test(template) ? template : getSettings().defaultTemplate,
     };
     return write(meeting);
   }
@@ -297,10 +314,25 @@ function createStore(baseDir, cipher) {
 
   function update(id, patch) {
     const m = get(id);
+    if ('template' in patch && !(typeof patch.template === 'string' && TEMPLATE_ID.test(patch.template))) throw new Error('Unknown summary template.');
     for (const k of UPDATABLE) {
       if (k in patch) m[k] = patch[k];
     }
     return write(m);
+  }
+
+  function cleanItem(item) {
+    const text = String((item && item.text) || '').replace(/\s+/g, ' ').trim().slice(0, 5000);
+    if (!text) return null;
+    return { t: Math.max(0, Number(item.t) || 0), source: SOURCES.has(item.source) ? item.source : 'others', text };
+  }
+
+  // Replaces the whole transcript, used when a meeting is transcribed again from its saved audio.
+  function setTranscript(id, items) {
+    const m = get(id);
+    m.transcript = (Array.isArray(items) ? items : []).map(cleanItem).filter(Boolean).sort((a, b) => a.t - b.t);
+    write(m);
+    return m;
   }
 
   function appendTranscript(id, item) {
@@ -343,7 +375,7 @@ function createStore(baseDir, cipher) {
         { where: 'Attendees', text: m.attendees },
         { where: 'Agenda', text: m.agendaPre },
         ...(m.notes || []).map((n) => ({ where: 'Note', t: n.t, text: n.text })),
-        ...(m.transcript || []).map((x) => ({ where: x.source === 'you' ? 'You' : 'Others', t: x.t, text: x.text })),
+        ...(m.transcript || []).map((x) => ({ where: speakerLabel(x.source), t: x.t, text: x.text })),
         ...summaryTexts(m.summary).map((text) => ({ where: 'Summary', text })),
       ].filter((x) => x.text);
       const all = fields.map((x) => String(x.text).toLowerCase()).join('\n');
@@ -390,8 +422,8 @@ function createStore(baseDir, cipher) {
 
   return {
     getSettings, setSettings, getApiKey, getOpenaiKey, getAiConfig, getOutlookRefresh, setOutlookRefresh, getIcsUrl, findByCalendarEvent,
-    create, list, get, update, appendTranscript, editTranscript, search, addNote, setSummary, remove, wipeAll,
+    create, list, get, update, appendTranscript, setTranscript, editTranscript, search, addNote, setSummary, remove, wipeAll,
   };
 }
 
-module.exports = { createStore, ID_PATTERN };
+module.exports = { createStore, ID_PATTERN, speakerLabel, TEMPLATE_ID };

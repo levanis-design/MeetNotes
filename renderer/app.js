@@ -23,6 +23,8 @@
     updates: null,
     view: 'dashboard',
     olVerify: null,
+    job: null,        // transcribing saved or imported audio: { meetingId, cancel }
+    templates: [],
   };
 
   // ---------- helpers ----------
@@ -55,6 +57,7 @@
     let t;
     return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
   }
+  const speaker = (source) => (source === 'you' ? 'You' : source === 'mixed' ? 'Recording' : 'Others');
   const isLive = () => state.cur && state.cur.status === 'live';
   const dash = () => window.MNDash || null;
 
@@ -216,7 +219,9 @@
       toast('End the current meeting before opening another one.', true);
       return;
     }
+    if (state.job && state.cur && state.cur.id !== id) return toast('Wait for the recording to finish transcribing, or press Stop.', true);
     const seq = ++openMeetingSeq;
+    let interrupted = false;
     let m = await api.getMeeting(id);
     if (seq !== openMeetingSeq) return;
     // A meeting left "live" by a closed window or a crash has no recording running any more.
@@ -225,11 +230,21 @@
       const patch = { status: 'ended', endedAt: new Date().toISOString(), elapsedSec: Math.max(m.elapsedSec || 0, Math.round(lastT)) };
       m = await api.updateMeeting(id, patch);
       if (seq !== openMeetingSeq) return;
+      interrupted = true;
       loadList();
     }
     state.cur = m;
     if (!isLive()) state.base = m.elapsedSec || 0;
     renderMeeting();
+    if (interrupted) {
+      const a = await api.audioSummary(id).catch(() => null);
+      if (a && a.files && state.cur && state.cur.id === id) {
+        const b = $('banner');
+        b.hidden = false;
+        b.className = 'banner warn';
+        b.textContent = 'This meeting was interrupted while recording. Speech that was waiting to be transcribed may be missing. Choose "Recover missing speech" under the transcript to transcribe it from the saved audio.';
+      }
+    }
     renderList();
     showView('meetings');
     if (opts && opts.tab) showTab(opts.tab);
@@ -259,6 +274,8 @@
     renderTranscript();
     renderNotes();
     renderSummary();
+    renderTemplatePicker();
+    refreshAudioBar();
     $('mTimer').textContent = fmt(isLive() ? elapsed() : m.elapsedSec || 0);
   }
 
@@ -275,14 +292,18 @@
     $('pauseBtn').textContent = state.paused ? 'Resume recording' : 'Pause';
     $('pauseBtn').classList.toggle('resume', state.paused);
     $('cornerBtn').hidden = !live;
-    $('deleteBtn').disabled = live;
+    $('deleteBtn').disabled = live || Boolean(state.job);
+    $('startBtn').disabled = Boolean(state.job);
     if (state.updates) renderUpdateState(state.updates);
     updateLiveChip();
     const banner = $('banner');
     if (live || m.status === 'planned') {
       banner.hidden = false;
       banner.className = 'banner';
-      banner.textContent = 'Audio is not saved, only the recognized text is kept on this computer. Tell participants that you are recording notes. Some states require everyone’s consent to record.';
+      banner.textContent = (state.settings && state.settings.saveAudio
+        ? 'Audio and the recognized text are kept on this computer only. '
+        : 'Audio is not saved, only the recognized text is kept on this computer. ') +
+        'Tell participants that you are recording notes. Some states require everyone’s consent to record.';
     } else if (!banner.classList.contains('warn')) {
       banner.hidden = true;
     }
@@ -292,13 +313,13 @@
     const box = $('transcript');
     const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
     const p = document.createElement('p');
-    p.className = 'tx ' + (item.source === 'you' ? 'you' : 'others');
+    p.className = 'tx ' + (item.source === 'you' ? 'you' : item.source === 'mixed' ? 'mixed' : 'others');
     const t = document.createElement('span');
     t.className = 't';
     t.textContent = fmt(item.t);
     const who = document.createElement('span');
     who.className = 'who';
-    who.textContent = item.source === 'you' ? 'You' : 'Others';
+    who.textContent = speaker(item.source);
     const text = document.createElement('span');
     text.className = 'txt';
     text.textContent = item.text;
@@ -456,6 +477,12 @@
       toast('Preparing the speech model...', false, 0);
       await api.ensureModel();
       hideToast();
+      state.settings = await api.getSettings();
+      const meetingId = m.id;
+      const saveAudio = state.settings.saveAudio ? {
+        begin: (source, t, mime) => api.audioBegin(meetingId, { source, t, mime }),
+        append: (name, bytes) => api.audioAppend(meetingId, name, bytes),
+      } : null;
       state.base = m.elapsedSec || 0;
       state.segStart = Date.now();
       state.paused = false;
@@ -466,6 +493,7 @@
         getElapsed: elapsed,
         onSegment: handleSegment,
         onLevel: (source, rms) => { state.levels[source] = rms; },
+        saveAudio,
         onWarning: (msg) => {
           const b = $('banner');
           b.hidden = false;
@@ -577,7 +605,7 @@
   async function generate() {
     const m = state.cur;
     if (!m || isLive() || state.transitioning) return toast('End the meeting before generating its summary.', true);
-    if (state.pending) return toast('Some speech is still being transcribed. Generate the summary when it finishes.', true);
+    if (state.pending || state.job) return toast('Some speech is still being transcribed. Generate the summary when it finishes.', true);
     $('genBtn').disabled = true;
     toast('Generating summary and agenda...', false, 0);
     try {
@@ -603,6 +631,127 @@
     } catch (e) {
       toast('Export failed: ' + errText(e), true, 8000);
     }
+  }
+
+  // ---------- summary templates ----------
+  async function loadTemplates() {
+    try { state.templates = await api.listTemplates(); } catch (_) { state.templates = []; }
+    return state.templates;
+  }
+  function fillTemplateSelect(sel, value) {
+    sel.textContent = '';
+    const list = state.templates.length ? state.templates : [{ id: 'standard', name: 'Standard meeting' }];
+    for (const t of list) {
+      const o = document.createElement('option');
+      o.value = t.id;
+      o.textContent = t.custom ? `${t.name} (yours)` : t.name;
+      sel.append(o);
+    }
+    sel.value = list.some((t) => t.id === value) ? value : 'standard';
+  }
+  function renderTemplatePicker() {
+    if (!state.cur) return;
+    fillTemplateSelect($('genTemplate'), state.cur.template || (state.settings && state.settings.defaultTemplate) || 'standard');
+  }
+
+  // ---------- saved audio: transcribe again, recover, import ----------
+  function mb(bytes) {
+    return bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  }
+  let audioSeq = 0;
+  async function refreshAudioBar() {
+    const m = state.cur;
+    const bar = $('audioBar');
+    const seq = ++audioSeq;
+    if (!m || isLive()) { if (!state.job) bar.hidden = true; return; }
+    let a;
+    try { a = await api.audioSummary(m.id); } catch (_) { a = null; }
+    if (seq !== audioSeq || !state.cur || state.cur.id !== m.id) return;
+    const has = Boolean(a && a.files);
+    bar.hidden = !has && !state.job;
+    if (!has) return;
+    if (!state.job) $('audioInfo').textContent = a.imported ? 'Imported recording' : `Saved audio: ${mb(a.bytes)}`;
+    const busy = Boolean(state.job);
+    $('recoverBtn').hidden = busy || a.imported;
+    $('retxBtn').hidden = busy;
+    $('audioDelBtn').hidden = busy || (a.imported && !a.bytes);
+    $('audioCancelBtn').hidden = !busy;
+  }
+
+  function jobProgress(text) {
+    $('audioInfo').textContent = text;
+  }
+
+  // mode "replace": transcribe all saved audio and replace the transcript when done.
+  // mode "recover": transcribe only the stretches that have no transcript lines yet, and add them.
+  async function transcribeSaved(mode, { confirmReplace = true } = {}) {
+    const m = state.cur;
+    if (!m || isLive() || state.transitioning || state.job) return;
+    if (state.pending) return toast('Wait for the current transcription to finish.', true);
+    let files;
+    try { files = (await api.audioList(m.id)).filter((f) => f.bytes > 0); } catch (e) { return toast(errText(e), true); }
+    if (!files.length) return toast('This meeting has no saved audio.', true);
+    if (mode === 'replace' && confirmReplace && (m.transcript || []).length &&
+      !confirm('Transcribe the whole meeting again from the saved audio? The current transcript, including your corrections, is replaced when it finishes.')) return;
+    const job = { meetingId: m.id, cancel: false };
+    state.job = job;
+    updateControls();
+    await refreshAudioBar();
+    jobProgress('Preparing the speech model...');
+    const found = [];
+    let added = 0;
+    let end = 0;
+    try {
+      await api.ensureModel();
+      for (let f = 0; f < files.length && !job.cancel; f++) {
+        const file = files[f];
+        const label = files.length > 1 ? ` (file ${f + 1} of ${files.length})` : '';
+        jobProgress(`Reading audio${label}...`);
+        const samples = await window.MNAudio.decode(await api.audioRead(m.id, file.name));
+        end = Math.max(end, file.t + samples.length / window.MNAudio.RATE);
+        const segs = window.MNAudio.segments(samples, file.t);
+        for (let i = 0; i < segs.length && !job.cancel; i++) {
+          jobProgress(`Transcribing${label}: ${Math.round((i / segs.length) * 100)}%`);
+          const s = segs[i];
+          if (mode === 'recover' && window.MNAudio.covered(m.transcript, file.source, s)) continue;
+          const item = await api.transcribe({ meetingId: m.id, source: file.source, t: s.t, samples: s.samples, save: mode === 'recover' });
+          if (!item) continue;
+          if (mode === 'recover') {
+            added++;
+            if (state.cur && state.cur.id === m.id) { state.cur.transcript.push(item); renderTranscript(); }
+          } else {
+            found.push(item);
+          }
+        }
+      }
+      if (job.cancel) {
+        toast(mode === 'recover' ? `Stopped. ${added} recovered line${added === 1 ? ' was' : 's were'} kept.` : 'Stopped. The transcript was not changed.');
+      } else {
+        if (mode === 'replace') state.cur = await api.setTranscript(m.id, found);
+        // An imported recording has no recorded duration until it has been read.
+        if (end > (state.cur.elapsedSec || 0)) state.cur = await api.updateMeeting(m.id, { elapsedSec: Math.round(end) });
+        toast(mode === 'replace'
+          ? `Transcribed ${found.length} line${found.length === 1 ? '' : 's'}. Generate the summary when ready.`
+          : added ? `Recovered ${added} missing line${added === 1 ? '' : 's'}.` : 'Nothing was missing. Every stretch of speech already has transcript lines.');
+        if (!$('banner').hidden && $('banner').classList.contains('warn')) $('banner').hidden = true;
+      }
+    } catch (e) {
+      toast('Transcribing the audio failed: ' + errText(e), true, 9000);
+    } finally {
+      state.job = null;
+      if (state.cur && state.cur.id === m.id) { state.cur = await api.getMeeting(m.id); renderMeeting(); }
+      loadList();
+    }
+  }
+
+  async function importRecording() {
+    if (isLive() || state.transitioning || state.job) return toast('End the current meeting or transcription first.', true);
+    let m;
+    try { m = await api.importRecording(); } catch (e) { return toast(errText(e), true, 9000); }
+    if (!m) return;
+    await loadList();
+    await openMeeting(m.id, { tab: 'meeting' });
+    await transcribeSaved('replace', { confirmReplace: false });
   }
 
   // ---------- window options ----------
@@ -705,6 +854,10 @@
     $('sMiniSize').value = s.miniSize;
     $('sMiniCorner').value = s.miniCorner;
     $('sAutoMini').checked = s.autoMini;
+    $('sVad').checked = s.vadFilter;
+    $('sSaveAudio').checked = s.saveAudio;
+    await loadTemplates();
+    fillTemplateSelect($('sDefaultTemplate'), s.defaultTemplate);
     renderUpdateState(await api.getUpdateState());
     $('settingsDlg').showModal();
     if (section === 'calendar') $('olSection').scrollIntoView();
@@ -727,6 +880,9 @@
       openaiBaseUrl: $('sOaBase').value,
       openaiModel: $('sOaModel').value,
       cliPath: $('sCliPath').value,
+      vadFilter: $('sVad').checked,
+      saveAudio: $('sSaveAudio').checked,
+      defaultTemplate: $('sDefaultTemplate').value || 'standard',
     };
     const oaKey = $('sOaKey').value.trim();
     if (oaKey) patch.openaiKey = oaKey;
@@ -760,6 +916,25 @@
   });
 
   $('search').addEventListener('input', runSearch);
+  $('importBtn').addEventListener('click', importRecording);
+  $('recoverBtn').addEventListener('click', () => transcribeSaved('recover'));
+  $('retxBtn').addEventListener('click', () => transcribeSaved('replace'));
+  $('audioCancelBtn').addEventListener('click', () => { if (state.job) { state.job.cancel = true; jobProgress('Stopping after the current segment...'); } });
+  $('audioDelBtn').addEventListener('click', async () => {
+    const m = state.cur;
+    if (!m || state.job) return;
+    try {
+      if (await api.audioRemove(m.id)) { toast('Saved audio deleted. The transcript is kept.'); refreshAudioBar(); }
+    } catch (e) { toast(errText(e), true); }
+  });
+  $('genTemplate').addEventListener('change', (e) => saveField({ template: e.target.value }));
+  $('sTemplatesFolder').addEventListener('click', async () => {
+    try { await api.openTemplatesFolder(); } catch (e) { toast(errText(e), true); }
+  });
+  api.onAiProgress((p) => {
+    if (p.combining) toast('Combining the parts into the summary and agenda...', false, 0);
+    else toast(`Long meeting: condensing part ${p.part} of ${p.total} before summarizing...`, false, 0);
+  });
   $('startBtn').addEventListener('click', startMeeting);
   $('stopBtn').addEventListener('click', stopMeeting);
   $('pauseBtn').addEventListener('click', () => (state.paused ? resumeMeeting() : pauseMeeting()));
@@ -982,6 +1157,7 @@
   };
 
   api.getSettings().then((s) => { state.settings = s; setPinned(Boolean(s.mainAlwaysOnTop)); });
+  loadTemplates().then(() => renderTemplatePicker());
   loadList();
   if (dash()) dash().onView(state.view);
 })();

@@ -152,6 +152,7 @@
         <div id="mlist">
           <div class="side-top">
             <button id="newBtn" class="primary">New meeting</button>
+            <button id="importBtn" title="Transcribe an audio or video file, for example a recording of a call">Import recording</button>
             <input id="search" type="search" placeholder="Search titles, notes, transcripts, summaries" aria-label="Search all meetings">
           </div>
           <ul id="list"></ul>
@@ -204,11 +205,21 @@
                 <div class="label">Live transcript <span class="hint">Click a line to correct it. Clear the text to remove it.</span></div>
                 <div id="transcript" class="transcript"></div>
                 <p id="pending" class="muted" hidden></p>
+                <div id="audioBar" class="audio-bar" hidden>
+                  <span id="audioInfo" class="muted"></span>
+                  <span class="audio-actions">
+                    <button id="recoverBtn" title="Transcribes only the parts of the saved audio that have no transcript lines, for example after a crash">Recover missing speech</button>
+                    <button id="retxBtn" title="Transcribes the whole saved audio again with the speech model chosen in Settings, replacing the transcript">Transcribe again</button>
+                    <button id="audioCancelBtn" hidden>Stop</button>
+                    <button id="audioDelBtn" title="Deletes the saved audio and keeps the transcript">Delete audio</button>
+                  </span>
+                </div>
               </div>
             </div>
 
             <div id="paneSummary" class="pane" hidden>
               <div class="gen-bar">
+                <select id="genTemplate" aria-label="Summary template" title="Kind of meeting. Adds sections written for it to the summary."></select>
                 <input id="genInstruction" placeholder="Optional instruction, for example: focus on budget and schedule items">
                 <button id="genBtn" class="primary">Generate summary and agenda</button>
               </div>
@@ -363,6 +374,10 @@
         <input id="sCliPath" autocomplete="off" placeholder="Leave blank to use claude or codex from the PATH">
         <p class="muted">Install once in PowerShell: <code>npm install -g @anthropic-ai/claude-code</code> for Claude Code, or <code>npm install -g @openai/codex</code> for Codex. Then run <code>claude</code> or <code>codex</code> once and sign in. MeetNotes sends the meeting text to it and reads the reply.</p>
       </div>
+      <label class="label" for="sDefaultTemplate">Summary template for new meetings</label>
+      <select id="sDefaultTemplate"></select>
+      <p class="muted">Templates add sections for a kind of meeting, such as blockers for a standup. You can change the template of each meeting on its Summary tab. To make your own, open the templates folder, copy the example, rename it to end in .json and edit it.</p>
+      <div class="dlg-actions left"><button type="button" id="sTemplatesFolder">Open templates folder</button></div>
       <p class="muted">Using Microsoft Copilot, ChatGPT, Claude.ai or another tool without a connection? On the Summary tab, choose "Copy prompt for any AI", paste it into the tool, copy the whole reply, then choose "Paste AI reply".</p>
 
       <h3>Speech</h3>
@@ -373,6 +388,8 @@
         <option value="Xenova/whisper-small.en">small.en (most accurate, slowest)</option>
       </select>
       <p class="muted">The speech model downloads once, the first time you start a meeting, and then runs on this computer.</p>
+      <label class="check"><input type="checkbox" id="sVad"> Skip silence and background noise before transcribing (recommended, stops made-up lines such as "Thank you for watching")</label>
+      <label class="check"><input type="checkbox" id="sSaveAudio"> Keep meeting audio on this computer, so a meeting can be transcribed again or recovered after a crash (about 15 MB per hour for each side)</label>
 
       <h3>Floating widget</h3>
       <p class="muted">A small always-on-top recording widget shows the timer and controls while a meeting is live.</p>
@@ -422,6 +439,7 @@
 
   <script src="segmenter.js"></script>
   <script src="capture.js"></script>
+  <script src="audio-job.js"></script>
   <script src="app.js"></script>
   <script src="dashboard.js"></script>
 </body>

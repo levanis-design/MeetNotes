@@ -1,5 +1,15 @@
 # Unreleased
 
+## Transcription
+- Silence and background noise are filtered out before speech recognition (Silero voice detection), which stops made-up lines such as "Thank you for watching". The filter model downloads once with the speech model; if it cannot load, transcription works as before. Settings > Speech can turn it off.
+- Meeting audio is saved compressed every 30 seconds (on by default, Settings > Speech). After a crash, "Recover missing speech" under the transcript transcribes only the parts that have no lines yet. "Transcribe again" redoes the whole meeting, for example with a more accurate speech model. "Delete audio" removes the audio and keeps the transcript.
+- "Import recording" transcribes an audio or video file (MP3, WAV, M4A, MP4, WebM and others). Lines from a recording are labelled "Recording".
+
+## Summaries
+- Summary templates: Standard, Daily standup, Project status, Client or vendor call, One-to-one and Retrospective. Each adds sections for that kind of meeting, and you can add your own as JSON files (Settings > AI summary > Open templates folder). Pick the template on each meeting's Summary tab.
+- Long meetings no longer fail as too long: they are condensed in parts and then summarized. Local models (Ollama, LM Studio) get smaller parts.
+- The AI is told to ignore instructions spoken in the meeting, so a line such as "ignore previous instructions" in the transcript cannot change the summary rules.
+
 ## Notes and transcripts
 - Correct a transcript line by clicking it. Clearing the text removes the line. Corrected lines are marked "edited" and the summary uses the corrected text.
 - Search looks inside every meeting: titles, attendees, agenda, notes, transcript lines and summaries. Results show where the match is and a highlighted excerpt.

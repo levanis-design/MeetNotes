@@ -16,11 +16,25 @@ contextBridge.exposeInMainWorld('api', {
   editTranscript: (id, change) => invoke('meetings:editTranscript', id, change),
   searchMeetings: (query) => invoke('meetings:search', query),
   removeMeeting: (id) => invoke('meetings:remove', id),
+  setTranscript: (id, items) => invoke('meetings:setTranscript', id, items),
   wipeAll: () => invoke('data:wipe'),
 
   ensureModel: () => invoke('model:ensure'),
   transcribe: (payload) => invoke('audio:transcribe', payload),
   onModelStatus: (cb) => ipcRenderer.on('model:status', (e, msg) => cb(msg)),
+
+  // Saved audio, imported recordings and transcribing again
+  audioBegin: (id, info) => invoke('audio:begin', id, info),
+  audioAppend: (id, name, bytes) => invoke('audio:append', id, name, bytes),
+  audioList: (id) => invoke('audio:list', id),
+  audioSummary: (id) => invoke('audio:summary', id),
+  audioRead: (id, name) => invoke('audio:read', id, name),
+  audioRemove: (id) => invoke('audio:remove', id),
+  importRecording: () => invoke('audio:import'),
+
+  listTemplates: () => invoke('templates:list'),
+  openTemplatesFolder: () => invoke('templates:openFolder'),
+  onAiProgress: (cb) => ipcRenderer.on('ai:progress', (e, p) => cb(p)),
 
   generate: (id, instruction) => invoke('ai:generate', { id, instruction }),
   aiPrompt: (id, instruction) => invoke('ai:prompt', { id, instruction }),

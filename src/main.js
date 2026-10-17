@@ -14,6 +14,8 @@ const { createOutlook } = require('./outlook');
 const icsCal = require('./ics');
 const { createServices } = require('./services');
 const { createOutlookDesktop } = require('./outlook-desktop');
+const { createAudioStore } = require('./audio-store');
+const templates = require('./templates');
 
 let win = null;
 let mini = null;
@@ -24,6 +26,9 @@ let services = null;
 let outlookDesktop = null;
 let transcriber = null;
 let updates = null;
+let audio = null;
+
+const templatesDir = () => path.join(app.getPath('userData'), 'templates');
 
 // Two processes must not write the same local JSON files or capture a meeting twice.
 const primaryInstance = app.requestSingleInstanceLock();
@@ -346,7 +351,11 @@ function registerIpc() {
   ipcMain.handle('meetings:addNote', (e, id, note) => store.addNote(id, note || {}));
   ipcMain.handle('meetings:editTranscript', (e, id, change) => store.editTranscript(id, change || {}));
   ipcMain.handle('meetings:search', (e, query) => store.search(query));
-  ipcMain.handle('meetings:remove', (e, id) => store.remove(id));
+  ipcMain.handle('meetings:remove', (e, id) => {
+    store.remove(id);
+    audio.remove(id);
+  });
+  ipcMain.handle('meetings:setTranscript', (e, id, items) => store.setTranscript(id, items));
   ipcMain.handle('data:wipe', async () => {
     const r = await dialog.showMessageBox(win, {
       type: 'warning',
@@ -358,6 +367,7 @@ function registerIpc() {
     });
     if (r.response !== 1) return false;
     store.wipeAll();
+    audio.wipe();
     return true;
   });
 
@@ -366,20 +376,96 @@ function registerIpc() {
     await getTranscriber().ensureReady();
     return true;
   });
-  ipcMain.handle('audio:transcribe', async (e, { meetingId, source, t, samples }) => {
-    const audio = toFloat32(samples);
-    let text;
+  // save: false returns the line without storing it (used when a whole meeting is transcribed again).
+  ipcMain.handle('audio:transcribe', async (e, { meetingId, source, t, samples, save = true }) => {
+    const pcm = toFloat32(samples);
+    const opts = { vad: store.getSettings().vadFilter, full: true };
+    let r;
     try {
-      text = await getTranscriber().transcribe(audio);
+      r = await getTranscriber().transcribe(pcm, opts);
     } catch (err) {
       // If the speech worker crashed, getTranscriber() starts a fresh one. Retry once so the segment is not lost.
       if (transcriber && transcriber.state === 'disposed') throw err;
-      text = await getTranscriber().transcribe(audio.slice(0));
+      r = await getTranscriber().transcribe(pcm.slice(0), opts);
     }
-    if (!text) return null;
-    const item = { t: Math.max(0, Number(t) || 0), source: source === 'you' ? 'you' : 'others', text };
-    store.appendTranscript(meetingId, item);
+    if (!r.text) return null;
+    const item = {
+      t: Math.round((Math.max(0, Number(t) || 0) + r.offsetSec) * 10) / 10,
+      source: ['you', 'others', 'mixed'].includes(source) ? source : 'others',
+      text: r.text,
+    };
+    if (save) store.appendTranscript(meetingId, item);
     return item;
+  });
+
+  // Saved meeting audio
+  ipcMain.handle('audio:begin', (e, id, info) => {
+    if (!store.getSettings().saveAudio) return null;
+    store.get(id); // the meeting must exist
+    return audio.begin(id, info || {});
+  });
+  ipcMain.handle('audio:append', (e, id, name, bytes) => audio.append(id, name, bytes));
+  ipcMain.handle('audio:list', (e, id) => audio.list(id));
+  ipcMain.handle('audio:summary', (e, id) => audio.summary(id));
+  ipcMain.handle('audio:read', (e, id, name) => {
+    const buf = audio.read(id, name);
+    return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+  });
+  ipcMain.handle('audio:remove', async (e, id) => {
+    const r = await dialog.showMessageBox(win, {
+      type: 'warning',
+      buttons: ['Cancel', 'Delete audio'],
+      defaultId: 0,
+      cancelId: 0,
+      message: 'Delete the saved audio of this meeting?',
+      detail: 'The transcript, notes and summary are kept. The meeting can no longer be transcribed again. Imported files stay where they are.',
+    });
+    if (r.response !== 1) return false;
+    audio.remove(id);
+    return true;
+  });
+  ipcMain.handle('audio:import', async () => {
+    const r = await dialog.showOpenDialog(win, {
+      title: 'Import a recording',
+      properties: ['openFile'],
+      filters: [
+        { name: 'Audio and video', extensions: ['mp3', 'wav', 'm4a', 'aac', 'ogg', 'oga', 'opus', 'webm', 'flac', 'mp4', 'mov', 'mkv'] },
+        { name: 'All files', extensions: ['*'] },
+      ],
+    });
+    if (r.canceled || !r.filePaths.length) return null;
+    const file = r.filePaths[0];
+    const st = fs.statSync(file);
+    const m = store.create({ title: path.basename(file).replace(/\.[^.]+$/, '') });
+    try {
+      audio.addExternal(m.id, file);
+    } catch (err) {
+      store.remove(m.id);
+      throw err;
+    }
+    const when = (st.birthtime && st.birthtime.getTime() ? st.birthtime : st.mtime).toISOString();
+    return store.update(m.id, { status: 'ended', startedAt: when, endedAt: when });
+  });
+
+  // Summary templates
+  ipcMain.handle('templates:list', () => templates.listTemplates(templatesDir()).map((t) => ({ id: t.id, name: t.name, custom: Boolean(t.custom) })));
+  ipcMain.handle('templates:openFolder', async () => {
+    const dir = templatesDir();
+    fs.mkdirSync(dir, { recursive: true });
+    const example = path.join(dir, 'example-site-visit.json.txt');
+    if (!fs.existsSync(example)) {
+      fs.writeFileSync(example, JSON.stringify({
+        id: 'site-visit',
+        name: 'Site visit',
+        focus: 'This is a walk-through of a building or site. Record observations by location.',
+        sections: [
+          { title: 'Observations by location', instruction: 'One bullet per area visited, with what was found.' },
+          { title: 'Safety items', instruction: 'Any safety concern raised.' },
+        ],
+      }, null, 2) + '\n', 'utf8');
+    }
+    await shell.openPath(dir);
+    return dir;
   });
 
   // AI
@@ -391,19 +477,23 @@ function registerIpc() {
     }
     return { ...saved, tasksAdded };
   }
+  const templateFor = (meeting) => templates.getTemplate(meeting.template || store.getSettings().defaultTemplate, templatesDir());
   ipcMain.handle('ai:generate', async (e, { id, instruction }) => {
     const meeting = store.get(id);
     const summary = await ai.generateSummary({
       cfg: store.getAiConfig(),
       meeting,
       instruction,
+      template: templateFor(meeting),
+      onProgress: (p) => { if (win && !win.isDestroyed()) win.webContents.send('ai:progress', p); },
       fetchImpl: (url, init) => net.fetch(url, init),
     });
     return saveSummary(id, summary);
   });
   // Any other AI tool (Copilot, ChatGPT, Claude.ai, Gemini): copy the prompt, paste the reply back.
   ipcMain.handle('ai:prompt', (e, { id, instruction }) => {
-    const text = ai.manualPrompt(store.get(id), instruction);
+    const meeting = store.get(id);
+    const text = ai.manualPrompt(meeting, instruction, templateFor(meeting));
     clipboard.writeText(text);
     return { chars: text.length };
   });
@@ -517,6 +607,7 @@ app.whenReady().then(() => {
   if (!primaryInstance) return;
   store = createStore(app.getPath('userData'), cipher);
   tasks = createTaskStore(app.getPath('userData'));
+  audio = createAudioStore(app.getPath('userData'));
   outlook = createOutlook({
     getConfig: () => {
       const s = store.getSettings();
