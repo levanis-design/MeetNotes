@@ -1,3 +1,4 @@
+git commit -m "main.png"
 # MeetNotes v1.4.0
 
 Personal Windows desktop app that tracks a meeting, transcribes it locally, keeps your notes, and generates a summary, action items and an after-meeting agenda with Claude, Codex, OpenAI or any AI tool you paste into.
