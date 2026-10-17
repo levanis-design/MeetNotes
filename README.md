@@ -173,3 +173,9 @@ The Windows NSIS installer uses `electron-updater` with the public GitHub Releas
 5. Verify the release contains all three assets and test checking/downloading from an older installed version before announcing it.
 
 Only published releases are used for updates; drafts and prereleases are skipped. The app does not downgrade. Existing local meetings and settings remain in the same user-data directory. The installer is currently unsigned; Windows code signing remains a recommended follow-up before wider distribution.
+![MeetNotes dashboard](1-saved-audio.png)
+![MeetNotes dashboard](2-summary-template.png)
+![MeetNotes dashboard](3-crash-recovery.png)
+![MeetNotes dashboard](4-import-recording.png)
+![MeetNotes dashboard](5-long-meeting.png)
+![MeetNotes dashboard](6-settings-templates.png)
