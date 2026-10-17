@@ -362,7 +362,7 @@ function registerIpc() {
       buttons: ['Cancel', 'Delete all meetings'],
       defaultId: 0,
       cancelId: 0,
-      message: 'Delete all meetings, transcripts and notes?',
+      message: 'Delete all meetings, saved audio, transcripts and notes?',
       detail: 'This cannot be undone. Your settings, tasks and API key are kept.',
     });
     if (r.response !== 1) return false;

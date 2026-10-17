@@ -152,15 +152,23 @@ function splitLines(lines, size, overlap = 2) {
   const parts = [];
   let cur = [];
   let len = 0;
+  if (!Number.isInteger(size) || size < 1) throw new Error('Transcript part size must be a positive integer.');
   for (const raw of lines) {
-    const line = raw.length > size ? raw.slice(0, size) : raw;
-    if (cur.length && len + line.length + 1 > size) {
-      parts.push(cur);
-      cur = cur.slice(-overlap).filter((l) => l.length < size / 4);
-      len = cur.reduce((n, l) => n + l.length + 1, 0);
+    const pieces = [];
+    for (let at = 0; at < raw.length; at += size) pieces.push(raw.slice(at, at + size));
+    if (!pieces.length) pieces.push('');
+    for (const line of pieces) {
+      if (cur.length && len + line.length + 1 > size) {
+        parts.push(cur);
+        cur = (overlap > 0 ? cur.slice(-overlap) : []).filter((l) => l.length < size / 4);
+        len = cur.reduce((n, l) => n + l.length + 1, 0);
+        while (cur.length && len + line.length + 1 > size) {
+          len -= cur.shift().length + 1;
+        }
+      }
+      cur.push(line);
+      len += line.length + 1;
     }
-    cur.push(line);
-    len += line.length + 1;
   }
   if (cur.length) parts.push(cur);
   return parts;

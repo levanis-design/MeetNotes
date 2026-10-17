@@ -154,6 +154,16 @@ test('ai: a short meeting is summarized in one request', async () => {
   assert.equal(calls, 1);
 });
 
+test('ai: oversized transcript lines keep their tail without exceeding the part limit', () => {
+  const line = 'start-' + 'x'.repeat(1500) + '-critical-final-decision';
+  const parts = ai.splitLines(['short context', line], 500, 0);
+  assert.ok(parts.every((part) => part.join('\n').length <= 500));
+  assert.equal(parts.flat().slice(1).join(''), line);
+  assert.ok(parts.at(-1).join('').endsWith('-critical-final-decision'));
+  const overlap = ai.splitLines(['short context', 'y'.repeat(490)], 500);
+  assert.ok(overlap.every((part) => part.join('\n').length <= 500));
+});
+
 test('ai: a long meeting is condensed in parts, then summarized from the notes', async () => {
   const reqs = [];
   const progress = [];

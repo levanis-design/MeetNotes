@@ -24,6 +24,12 @@ app.whenReady().then(async () => {
     while (win.webContents.isLoading()) await delay(100);
     const run = (code) => win.webContents.executeJavaScript(code);
     const sourceRoot = process.argv.includes('--packaged') ? '../dist/win-unpacked/resources/app.asar/src/' : '../src/';
+    if (process.argv.includes('--packaged')) {
+      for (const file of ['src/vad.js', 'src/audio-store.js', 'src/ai.js', 'renderer/audio-job.js', 'renderer/capture.js', 'renderer/app.js']) {
+        assert.deepEqual(fs.readFileSync(path.join(__dirname, '..', 'dist/win-unpacked/resources/app.asar', file)),
+          fs.readFileSync(path.join(__dirname, '..', file)), `packaged ${file} matches reviewed source`);
+      }
+    }
     const calendar = require(sourceRoot + 'ics');
     const outlook = require(sourceRoot + 'outlook');
     const from = new Date('2026-10-13T00:00:00Z');
@@ -143,6 +149,51 @@ app.whenReady().then(async () => {
     await run("document.getElementById('pauseBtn').click(); document.getElementById('stopBtn').click()");
     await delay(500);
     assert.equal(await run("document.getElementById('mStatus').textContent"), 'Ended');
+    // Save and decode real browser-recorded audio without using a microphone or speaker.
+    const savedAudio = await run(`(async () => {
+      const id = ${JSON.stringify(result.b.id)};
+      const ctx = new AudioContext();
+      const tone = ctx.createOscillator();
+      const dest = ctx.createMediaStreamDestination();
+      const mute = ctx.createGain(); mute.gain.value = 0;
+      tone.connect(mute); mute.connect(ctx.destination);
+      tone.connect(dest); tone.start(); await ctx.resume();
+      const warnings = [];
+      const recorder = createRecorder(dest.stream, 'you', 0, {
+        begin: (source, t, mime) => api.audioBegin(id, { source, t, mime }),
+        append: (name, bytes) => api.audioAppend(id, name, bytes)
+      }, msg => warnings.push(msg));
+      if (!recorder) throw new Error('Browser recording is unavailable');
+      await new Promise(r => setTimeout(r, 1200));
+      await recorder.stop(); tone.stop(); await ctx.close();
+      const files = (await api.audioList(id)).filter(f => f.bytes > 0);
+      if (!files.length) throw new Error('MediaRecorder produced no saved audio');
+      const pcm = await MNAudio.decode(await api.audioRead(id, files[0].name));
+      return { bytes: files[0].bytes, samples: pcm.length, warnings };
+    })()`);
+    assert.ok(savedAudio.bytes > 0 && savedAudio.samples > 0, 'recorded WebM can be decoded after saving');
+    assert.deepEqual(savedAudio.warnings, []);
+    let releaseReady;
+    ipcMain.removeHandler('model:ensure');
+    ipcMain.handle('model:ensure', () => new Promise(resolve => { releaseReady = resolve; }));
+    let wipes = 0;
+    ipcMain.removeHandler('data:wipe');
+    ipcMain.handle('data:wipe', () => { wipes++; return false; });
+    await run(`(async () => { await MN.openMeeting(${JSON.stringify(result.b.id)}); })()`);
+    await delay(100);
+    await run("document.getElementById('retxBtn').click()");
+    for (let i = 0; !releaseReady && i < 30; i++) await delay(100);
+    assert.ok(releaseReady, 'saved audio job has started');
+    await run("document.getElementById('newBtn').click()");
+    assert.equal(await run("document.getElementById('newDlg').open"), false, 'new meeting is blocked during transcription');
+    await run("document.getElementById('settingsBtn').click()");
+    await delay(150);
+    await run("document.getElementById('sWipe').click()");
+    assert.equal(wipes, 0, 'deleting all data is blocked during transcription');
+    await run("document.getElementById('sCancel').click(); document.getElementById('audioCancelBtn').click()");
+    releaseReady(true);
+    await delay(300);
+    assert.equal(await run("document.getElementById('startBtn').disabled"), false, 'cancelling releases the job controls');
     assert.deepEqual(errors, [], 'no renderer errors');
     console.log('PASS: dashboard/task creation and completion, removed publishing UI/API, updater settings, meeting edits/notes, PDF exports, widget, and recording lifecycle (fake capture).');
     clearTimeout(deadline);

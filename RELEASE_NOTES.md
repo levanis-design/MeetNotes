@@ -7,8 +7,9 @@
 
 ## Summaries
 - Summary templates: Standard, Daily standup, Project status, Client or vendor call, One-to-one and Retrospective. Each adds sections for that kind of meeting, and you can add your own as JSON files (Settings > AI summary > Open templates folder). Pick the template on each meeting's Summary tab.
-- Long meetings no longer fail as too long: they are condensed in parts and then summarized. Local models (Ollama, LM Studio) get smaller parts.
-- The AI is told to ignore instructions spoken in the meeting, so a line such as "ignore previous instructions" in the transcript cannot change the summary rules.
+- Long transcripts are condensed in parts and then summarized. Local models (Ollama, LM Studio) get smaller parts. Exceptionally large meetings or notes can still exceed the model's request limit.
+- The summary prompt tells the AI to treat instructions spoken in the meeting as content rather than commands. This reduces prompt-injection risk; it does not guarantee model behavior.
+- Review fixes prevent new meetings, data deletion and app updates during re-transcription, preserve the end of oversized transcript lines, and report audio-saving failures.
 
 ## Notes and transcripts
 - Correct a transcript line by clicking it. Clearing the text removes the line. Corrected lines are marked "edited" and the summary uses the corrected text.

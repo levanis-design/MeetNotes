@@ -83,6 +83,7 @@
   }
 
   function openNewDialog() {
+    if (state.job) return toast('Wait for transcription to finish, or press Stop.', true);
     if (isLive() || state.transitioning) return toast('End the current meeting before creating another one.', true);
     $('newForm').reset();
     $('newDlg').showModal();
@@ -233,6 +234,8 @@
       interrupted = true;
       loadList();
     }
+    // A warning belongs to the meeting it was shown for.
+    if (!state.cur || state.cur.id !== id) $('banner').classList.remove('warn');
     state.cur = m;
     if (!isLive()) state.base = m.elapsedSec || 0;
     renderMeeting();
@@ -251,6 +254,7 @@
   }
 
   async function openMeetingFromEvent(eventId) {
+    if (state.job) return toast('Wait for transcription to finish, or press Stop.', true);
     if (isLive() || state.transitioning) return toast('End the current meeting before starting notes for another one.', true);
     try {
       const r = await api.meetingFromEvent(eventId);
@@ -300,7 +304,7 @@
     if (live || m.status === 'planned') {
       banner.hidden = false;
       banner.className = 'banner';
-      banner.textContent = (state.settings && state.settings.saveAudio
+      banner.textContent = ((!state.settings || state.settings.saveAudio)
         ? 'Audio and the recognized text are kept on this computer only. '
         : 'Audio is not saved, only the recognized text is kept on this computer. ') +
         'Tell participants that you are recording notes. Some states require everyone’s consent to record.';
@@ -469,6 +473,7 @@
 
   // ---------- meeting lifecycle ----------
   async function startMeeting() {
+    if (state.job) return;
     const m = state.cur;
     if (!m || state.transitioning || isLive()) return;
     state.transitioning = true;
@@ -690,6 +695,7 @@
     if (state.pending) return toast('Wait for the current transcription to finish.', true);
     let files;
     try { files = (await api.audioList(m.id)).filter((f) => f.bytes > 0); } catch (e) { return toast(errText(e), true); }
+    if (!state.cur || state.cur.id !== m.id || isLive() || state.transitioning || state.job) return;
     if (!files.length) return toast('This meeting has no saved audio.', true);
     if (mode === 'replace' && confirmReplace && (m.transcript || []).length &&
       !confirm('Transcribe the whole meeting again from the saved audio? The current transcript, including your corrections, is replaced when it finishes.')) return;
@@ -786,7 +792,7 @@
       error: `Update failed: ${update.message}. Check your connection and try again, or use View releases.`,
     };
     $('updateStatus').textContent = `MeetNotes ${update.currentVersion}. ${labels[update.status] || ''}`;
-    const busy = isLive() || state.transitioning || ['checking', 'downloading', 'installing'].includes(update.status);
+    const busy = isLive() || state.transitioning || state.job || ['checking', 'downloading', 'installing'].includes(update.status);
     $('updateCheck').disabled = busy || update.status === 'development';
     $('updateDownload').hidden = update.status !== 'available';
     $('updateDownload').disabled = busy;
@@ -794,6 +800,7 @@
     $('updateInstall').disabled = busy;
   }
   async function updateAction(action) {
+    if (state.job) return toast('Wait for transcription to finish, or press Stop.', true);
     if (isLive() || state.transitioning) return toast('End the current meeting before updating the app.', true);
     try {
       const result = await action();
@@ -905,6 +912,7 @@
   $('calChip').addEventListener('click', () => openSettings('calendar'));
   $('nCancel').addEventListener('click', () => $('newDlg').close());
   $('newForm').addEventListener('submit', async () => {
+    if (isLive() || state.transitioning || state.job) return;
     const m = await api.createMeeting({
       title: $('nTitle').value,
       attendees: $('nAttendees').value,
@@ -944,6 +952,7 @@
     setPinned(await api.setAlwaysOnTop(on));
   });
   $('deleteBtn').addEventListener('click', async () => {
+    if (state.job) return;
     if (!state.cur || isLive() || state.transitioning) return;
     if (!confirm(`Delete "${state.cur.title}" and its transcript and notes? This cannot be undone.`)) return;
     await api.removeMeeting(state.cur.id);
@@ -968,6 +977,7 @@
     } catch (e) { toast('Copy failed: ' + errText(e), true); }
   });
   $('promptBtn').addEventListener('click', async () => {
+    if (state.job || state.pending) return toast('Wait for transcription to finish first.', true);
     const m = state.cur;
     if (!m) return;
     if (isLive() || state.transitioning) return toast('End the meeting first.', true);
@@ -977,6 +987,7 @@
     } catch (e) { toast(errText(e), true, 9000); }
   });
   $('pasteBtn').addEventListener('click', async () => {
+    if (state.job) return toast('Wait for transcription to finish first.', true);
     const m = state.cur;
     if (!m) return;
     if (isLive() || state.transitioning) return toast('End the meeting first.', true);
@@ -1120,6 +1131,7 @@
   });
 
   $('sWipe').addEventListener('click', async () => {
+    if (state.job) return toast('Wait for transcription to finish, or press Stop.', true);
     if (isLive() || state.transitioning) return toast('End the current meeting first.', true);
     if (await api.wipeAll()) {
       $('settingsDlg').close();

@@ -17,8 +17,11 @@ function createRecorder(stream, source, t, saveAudio, onWarning) {
   } catch (_) {
     return null;
   }
-  let chain = Promise.resolve(saveAudio.begin(source, t, mime)).catch(() => null);
   let warned = false;
+  const warn = () => {
+    if (!warned) { warned = true; onWarning('Saving the meeting audio failed. Transcription continues, but this recording may not be available to transcribe again later.'); }
+  };
+  let chain = Promise.resolve().then(() => saveAudio.begin(source, t, mime)).catch(() => { warn(); return null; });
   rec.ondataavailable = (e) => {
     if (!e.data || !e.data.size) return;
     const blob = e.data;
@@ -27,12 +30,14 @@ function createRecorder(stream, source, t, saveAudio, onWarning) {
       try {
         await saveAudio.append(name, await blob.arrayBuffer());
       } catch (err) {
-        if (!warned) { warned = true; onWarning('Saving the meeting audio failed. Transcription continues, but this part cannot be transcribed again later.'); }
+        warn();
+        return null; // later chunks depend on this one; do not append them to a broken file
       }
       return name;
     });
   };
   const stopped = new Promise((resolve) => { rec.onstop = resolve; });
+  rec.onerror = warn;
   rec.start(AUDIO_SLICE_MS);
   return {
     pause() { if (rec.state === 'recording') rec.pause(); },
